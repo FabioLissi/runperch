@@ -283,7 +283,12 @@ private slots:
     void asynchronousRealProducerOutput() {
         ProcessExecutor executor; bool called=false; CommandResult got;
         executor.run(QCoreApplication::applicationFilePath(),{"--process-fixture=echo"},[&](auto r) { called=true; got=r; });
-        QVERIFY(!called); QTRY_VERIFY(called); QVERIFY(got.ok); QCOMPARE(got.output,QByteArray("runner producer output\n"));
+        QVERIFY(!called); QTRY_VERIFY(called); QVERIFY(got.ok);
+#ifdef Q_OS_WIN
+        QCOMPARE(got.output,QByteArray("runner producer output\r\n"));
+#else
+        QCOMPARE(got.output,QByteArray("runner producer output\n"));
+#endif
         QVERIFY(!got.output.contains("private-stderr"));
     }
     void timeoutAndOutputLimits() {

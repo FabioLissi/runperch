@@ -67,3 +67,13 @@ initial development build.
 
 Real OAuth approval and live runner service changes remain untested. The
 development app still requires locally installed Qt and gh.
+
+## Windows newline correction
+
+Public run 41377009387 passed macOS, Linux and workflow lint. Windows reported
+46 passing core entries and one exact-output mismatch: its QTextStream stdout
+producer emits CRLF, but the test expected LF. The test now expects the native
+Windows bytes under Q_OS_WIN and retains the LF comparison elsewhere; no
+production output is normalized or changed. Independent review confirmed the
+receipt and ran the focused Mac regression (3 entries passed). Native Windows
+confirmation remains pending the next CI run.
