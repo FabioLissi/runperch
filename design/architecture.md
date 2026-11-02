@@ -5,6 +5,7 @@ reference conformance table in [authorization.md](authorization.md). Version 0.4
 local controls are specified in [local-service-controls.md](local-service-controls.md).
 Version 0.5 local metrics are specified in [local-stats.md](local-stats.md).
 Version 0.6 compact panel/history is specified in [menu-bar-popover.md](menu-bar-popover.md).
+Version 0.7 appearance/layout is specified in [themes.md](themes.md).
 
 ## Before / after / reason
 

@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/logo.png" width="100" height="100" alt="Runperch bird and R logo"></p>
+<p align="center"><img src="assets/app-icon.png" width="100" height="100" alt="Runperch bird and R logo"></p>
 
 <h1 align="center">Runperch</h1>
 
@@ -17,6 +17,8 @@ and open the current job without hunting through terminals.
 
 ## Features
 
+- **Appearance:** System, Light and Dark, with shared neutral color, typography
+  and spacing tokens across panels, controls, menus and charts.
 - **Runner overview:** one row per installation, details for the selected runner.
 - **Current work:** workflow, job, reported step, elapsed time and GitHub link.
 - **Local observations:** process-tree CPU average, aggregate RSS, free disk,
@@ -40,27 +42,22 @@ Click a thumbnail to see the full image.
 
 <table>
   <tr>
-    <td width="33%" align="center">
-      <a href="assets/screenshots/macos-first-launch.png"><img src="assets/screenshots/macos-first-launch.png" width="460" alt="Actual Runperch macOS first-launch window with Add existing runner"></a>
-      <br><strong>macOS app · first launch</strong><br>
-      Actual application capture from version 0.1.0.
+    <td width="50%" align="center">
+      <a href="assets/screenshots/macos-light-popover.png"><img src="assets/screenshots/macos-light-popover.png" width="300" alt="Runperch light compact panel with blue CPU and violet memory graphs"></a>
+      <br><strong>Light · compact runner panel</strong>
     </td>
-    <td width="33%" align="center">
-      <a href="assets/ui-concept.png"><img src="assets/ui-concept.png" width="460" alt="Runperch design concept with sample runners and a menu-bar panel"></a>
-      <br><strong>Interface design concept</strong><br>
-      Sample data and intended visual direction.
-    </td>
-    <td width="33%" align="center">
-      <a href="assets/screenshots/macos-popover.png"><img src="assets/screenshots/macos-popover.png" width="260" alt="Runperch compact runner panel with CPU and memory history"></a>
-      <br><strong>Compact runner panel · 0.6.0</strong><br>
-      Actual Qt interface with scripted sample data.
+    <td width="50%" align="center">
+      <a href="assets/screenshots/macos-dark-popover.png"><img src="assets/screenshots/macos-dark-popover.png" width="300" alt="Runperch graphite dark compact panel"></a>
+      <br><strong>Dark · compact runner panel</strong>
     </td>
   </tr>
 </table>
 
-The current app implements the table, details, metrics, history, settings and
-tray menu. The compact popover and CPU/RSS graphs are implemented in version 0.6.0. Public screenshots contain no personal
-runner configuration or credentials.
+Actual version 0.7.0 Qt interface, captured with scripted example data.
+[Overview](assets/screenshots/macos-dark-overview.png) and
+[appearance settings](assets/screenshots/macos-dark-settings.png) use the same
+shared tokens. Public screenshots contain no personal runner configuration or
+credentials.
 
 ## Status
 
@@ -145,6 +142,12 @@ JSON includes observation timestamps and only the metrics available. A
 successful query is not a health verdict: inspect the returned states.
 
 ## Controls and status
+
+Choose **Settings → Appearance → System / Light / Dark**, then **Save**.
+System follows the platform's appearance; explicit Light/Dark remains your
+choice. Theme-only changes do not query GitHub or change services. Qt6.8+ also
+requests matching native chrome; Qt6.5–6.7 retain OS-native chrome while the
+shared Qt interface uses the selected theme.
 
 - Click the menu-bar/tray icon for a compact runner panel. Choose a runner to
   see its live state and recent CPU/memory samples. Right-click for the action

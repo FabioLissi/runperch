@@ -1,6 +1,8 @@
 #include "ui/window.h"
 #include "ui/popover.h"
 #include "ui/display.h"
+#include "ui/theme.h"
+#include <QComboBox>
 #include <QCursor>
 #include "core/catalog.h"
 #include "runperch_version.h"
@@ -41,20 +43,17 @@ QLabel* label(const QString& value, const QString& name={}) {
     auto* l=new QLabel(value); l->setWordWrap(true); l->setTextFormat(Qt::PlainText);
     l->setObjectName(name); l->setTextInteractionFlags(Qt::TextSelectableByMouse); return l;
 }
-QColor stateColor(const QString& state) {
-    if(state=="Running") return QColor("#a65d06");
-    if(state=="Idle") return QColor("#24754c");
-    return QColor("#66716b");
-}
+
 }
 Window::Window(Monitor& m, Platform& p, GitHubAuth* a, ApplicationPresentation* presence, QWidget* parent) : QMainWindow(parent),monitor(m),platform(p),auth(a),presentation(presence) {
+    theme();
     setWindowTitle("Runperch"); resize(1120,780); setMinimumSize(760,600);
     setWindowIcon(QIcon(":/assets/app-icon.png"));
     auto* central=new QWidget; setCentralWidget(central);
     auto* row=new QHBoxLayout(central); row->setContentsMargins(0,0,0,0); row->setSpacing(0);
     auto* side=new QWidget; side->setObjectName("sidebar"); side->setFixedWidth(185);
     auto* nav=new QVBoxLayout(side); nav->setContentsMargins(18,28,18,18);
-    auto* logo=label("", "logo"); logo->setPixmap(QPixmap(":/assets/logo.png").scaled(54,54,Qt::KeepAspectRatio,Qt::SmoothTransformation));
+    auto* logo=label("", "logo"); logo->setPixmap(themedBrandMark());
     nav->addWidget(logo); nav->addWidget(label("Runperch","brand")); nav->addWidget(label("Your runners, in view.","muted")); nav->addSpacing(30);
     auto* overview=new QPushButton("Overview"); overview->setObjectName("selectedNav"); nav->addWidget(overview);
     auto* historyButton=new QPushButton("History"); nav->addWidget(historyButton);
@@ -103,28 +102,6 @@ Window::Window(Monitor& m, Platform& p, GitHubAuth* a, ApplicationPresentation* 
     stopButton=new QPushButton("Stop service…"); stopButton->setObjectName("stopService"); controls->addWidget(stopButton); column->addLayout(controls);
     column->addWidget(label("Monitoring existing runners · Closing Runperch does not stop them","footer"));
     row->addWidget(content,1);
-    setStyleSheet(R"(
-        QMainWindow, QWidget { background:#fbfaf7; color:#19362d; font-size:13px; }
-        QLabel { background:transparent; }
-        QWidget#sidebar { background:#efeee8; border-right:1px solid #dedfd7; }
-        QLabel#brand { font-size:26px; font-weight:700; }
-        QLabel#heading { font-size:23px; font-weight:650; }
-        QLabel#activity { font-size:19px; font-weight:600; }
-        QLabel#muted, QLabel#caption { color:#64736b; }
-        QLabel#caption { font-size:11px; }
-        QLabel#metrics { border-top:1px solid #dedfd7; border-bottom:1px solid #dedfd7; padding:12px 0; font-size:15px; }
-        QLabel#footer { color:#718077; font-size:11px; border-top:1px solid #dedfd7; padding-top:12px; }
-        QPushButton { border:1px solid #cbd2c9; border-radius:5px; padding:8px 10px; background:#fffefa; }
-        QPushButton:hover { background:#e7eee6; }
-        QPushButton:disabled { color:#969f98; background:#f1f0eb; }
-        QWidget#sidebar QPushButton { text-align:left; border:none; padding:11px 10px; background:transparent; }
-        QWidget#sidebar QPushButton#selectedNav { background:#d9e6dc; font-weight:600; }
-        QTableWidget { border:1px solid #dedfd7; border-radius:5px; background:#fffefa; selection-background-color:#dce8de; selection-color:#16372c; }
-        QHeaderView::section { background:#f3f3ec; border:none; border-bottom:1px solid #dedfd7; padding:8px; text-align:left; }
-        QMenu { background:#fbfaf7; border:1px solid #d2d8cf; padding:6px; }
-        QMenu::item { padding:7px 22px; } QMenu::item:selected { background:#dce8de; }
-        QSpinBox { padding:6px; background:white; }
-    )");
     menu=new QMenu(this); menu->setObjectName("trayActions"); tray=new QSystemTrayIcon(this);
     popover=new RunnerPopover(monitor,this,presentation ? presentation->popoverFlags() : Qt::Popup);
     if(presentation) presentation->configurePopover(popover);
@@ -163,6 +140,7 @@ Window::Window(Monitor& m, Platform& p, GitHubAuth* a, ApplicationPresentation* 
     connect(startButton,&QPushButton::clicked,this,[this] { control(ServiceAction::Start); });
     connect(stopButton,&QPushButton::clicked,this,[this] { control(ServiceAction::Stop); });
     connect(&monitor,&Monitor::changed,this,&Window::rebuild);
+    connect(&theme(),&ThemeController::changed,this,[this,logo] { logo->setPixmap(themedBrandMark()); rebuild(); });
     connect(&monitor,&Monitor::message,this,[this](const QString& message,bool error) {
         if(error) QMessageBox::warning(this,"Runperch",message); else statusBar()->showMessage(message,8000);
     });
@@ -200,7 +178,7 @@ void Window::rebuild() {
         QStringList values{r.registration.name,state,job,remoteActive ? elapsed(r.remote.startedAt) : "—"};
         for(int c=0;c<values.size();++c) {
             auto* item=new QTableWidgetItem(values[c]); item->setToolTip(values[c]);
-            if(c==1) item->setForeground(stateColor(state)); table->setItem(i,c,item);
+            if(c==1) item->setForeground(statusColor(state)); table->setItem(i,c,item);
         }
         if(r.registration.root==selectedRoot) selected=i;
     }
@@ -314,7 +292,10 @@ void Window::controlRunner(QString root,quint64 instance,ServiceAction action) {
 void Window::settings() {
     QDialog dialog(this); dialog.setWindowTitle("Runperch settings"); auto* layout=new QVBoxLayout(&dialog);
     auto* form=new QFormLayout; auto* seconds=new QSpinBox; seconds->setRange(5,3600); seconds->setSuffix(" seconds"); seconds->setValue(savedRefreshInterval());
-    form->addRow("Refresh interval",seconds); layout->addLayout(form);
+    form->addRow("Refresh interval",seconds);
+    auto* appearance=new QComboBox; appearance->setObjectName("themePreference");
+    appearance->addItems({"System","Light","Dark"}); appearance->setCurrentIndex(static_cast<int>(theme().preference()));
+    form->addRow("Appearance",appearance); layout->addLayout(form);
     QCheckBox* hideDock=nullptr;
     if(presentation && presentation->supportsDockVisibility()) {
         hideDock=new QCheckBox("Hide from Dock when the window is closed");
@@ -329,10 +310,12 @@ void Window::settings() {
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Save|QDialogButtonBox::Cancel); layout->addWidget(buttons);
     connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept); connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
     if(dialog.exec()==QDialog::Accepted) {
+        theme().setPreference(static_cast<ThemePreference>(appearance->currentIndex()));
         saveRefreshInterval(seconds->value()); monitor.setInterval(seconds->value());
         if(hideDock) { QSettings().setValue("hideDockWhenClosed",hideDock->isChecked()); updateDockVisibility(); }
+        const bool accessChanged=QSettings().value("runnerManagementStatus",false).toBool()!=management->isChecked();
         QSettings().setValue("runnerManagementStatus",management->isChecked());
-        monitor.setRunnerStatusAccessEnabled(management->isChecked()); monitor.refresh();
+        if(accessChanged) { monitor.setRunnerStatusAccessEnabled(management->isChecked()); monitor.refresh(); }
     }
 }
 void Window::authorization() {

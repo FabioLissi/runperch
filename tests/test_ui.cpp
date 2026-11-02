@@ -2,6 +2,13 @@
 #include "ui/popover.h"
 #include "ui/metrics_chart.h"
 #include "ui/display.h"
+#include "ui/theme.h"
+#include <QStyleHints>
+#include <QCheckBox>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QDialogButtonBox>
+#include <QVBoxLayout>
 #include "core/resource_history.h"
 #include <QComboBox>
 #include <QAbstractItemView>
@@ -61,7 +68,87 @@ public slots:
 class UiTests : public QObject {
     Q_OBJECT
 private slots:
-    void init() { QSettings().clear(); qApp->setQuitOnLastWindowClosed(false); }
+    void init() { QSettings().clear(); theme().setPreference(ThemePreference::System); qApp->setQuitOnLastWindowClosed(false); }
+    void themeResolverHonorsExplicitChoiceAndSystemFallback() {
+        QVERIFY(useDarkTheme(ThemePreference::System,Qt::ColorScheme::Dark));
+        QVERIFY(!useDarkTheme(ThemePreference::System,Qt::ColorScheme::Unknown));
+        QVERIFY(!useDarkTheme(ThemePreference::Light,Qt::ColorScheme::Dark));
+        QVERIFY(useDarkTheme(ThemePreference::Dark,Qt::ColorScheme::Light));
+#if QT_VERSION >= QT_VERSION_CHECK(6,8,0)
+        auto* hints=QGuiApplication::styleHints(); hints->setColorScheme(Qt::ColorScheme::Dark); qApp->processEvents(); QCOMPARE(theme().isDark(),hints->colorScheme()==Qt::ColorScheme::Dark);
+        hints->setColorScheme(Qt::ColorScheme::Light); qApp->processEvents(); QCOMPARE(theme().isDark(),hints->colorScheme()==Qt::ColorScheme::Dark);
+#endif
+    }
+    void liveThemeReachesRealWindowPopoverMenusAndChartWithoutQueries() {
+        QTemporaryDir runner; QFile f(runner.filePath(".runner")); QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("{\"agentId\":42,\"agentName\":\"theme-runner\",\"gitHubUrl\":\"https://github.com/example/project\"}"); f.close();
+        TestPlatform p; TestRemote g; p.value.state=ServiceState::Running; p.value.controlsAvailable=true;
+        p.value.observedAt=QDateTime::currentDateTimeUtc(); p.value.cpuCores=0.75; p.value.rssBytes=1073741824; p.value.activeWorkers=1;
+        Monitor m(p,g); QVERIFY(m.add(runner.path())); Window window(m,p); m.refresh(true); window.show();
+        auto* popup=window.findChild<RunnerPopover*>(); popup->present(QRect(400,40,20,20));
+        for(auto preference:{ThemePreference::Light,ThemePreference::Dark}) {
+            theme().setPreference(preference); qApp->processEvents(); const auto& t=theme().tokens();
+            QCOMPARE(window.palette().color(QPalette::WindowText),t.text);
+            QCOMPARE(popup->findChild<QLabel*>("popoverActivity")->palette().color(QPalette::WindowText),t.text);
+            QCOMPARE(window.findChild<QMenu*>("trayActions")->palette().color(QPalette::WindowText),t.text);
+            QCOMPARE(qApp->palette().color(QPalette::Disabled,QPalette::Text),t.disabled);
+            auto stateImage=popup->findChild<QLabel*>("popoverState")->grab().toImage(); int statePixels=0;
+            for(int y=0;y<stateImage.height();++y) for(int x=0;x<stateImage.width();++x) if(stateImage.pixelColor(x,y).rgb()==t.warning.rgb()) ++statePixels;
+            QVERIFY2(statePixels>0,"Rendered Running label ignores its semantic theme color");
+            auto logoImage=window.findChild<QLabel*>("logo")->pixmap().toImage(); int logoPixels=0;
+            for(int y=0;y<logoImage.height();++y) for(int x=0;x<logoImage.width();++x) if(logoImage.pixelColor(x,y).rgb()==t.accent.rgb()) ++logoPixels;
+            QVERIFY2(logoPixels>0,"Sidebar brand mark does not consume the current theme accent");
+            QCheckBox disabled("Unavailable setting",&window); disabled.setEnabled(false); disabled.show(); disabled.ensurePolished();
+            QCOMPARE(disabled.palette().color(QPalette::Disabled,QPalette::WindowText),t.disabled);
+            auto disabledImage=disabled.grab().toImage(); int disabledPixels=0;
+            for(int y=0;y<disabledImage.height();++y) for(int x=0;x<disabledImage.width();++x) if(disabledImage.pixelColor(x,y).rgb()==t.disabled.rgb()) ++disabledPixels;
+            QVERIFY(disabledPixels>0);
+            auto image=popup->findChild<QWidget*>("cpuHistory")->grab().toImage(); int accentPixels=0;
+            for(int y=0;y<image.height();++y) for(int x=0;x<image.width();++x) if(image.pixelColor(x,y).rgb()==t.accent.rgb()) ++accentPixels;
+            QVERIFY(accentPixels>0); QCOMPARE(g.calls,0); QCOMPARE(p.actions,0);
+        }
+        QCOMPARE(QSettings().value("appearance").toString(),QString("dark"));
+        const auto image=popup->grab().toImage(); QVERIFY(image.pixelColor(0,0).alpha()<10);
+        QVERIFY(popup->height()<500);
+    }
+    void compactLayoutWrapsLongWorkAndKeepsActionsScrollable() {
+        QTemporaryDir runner; QFile f(runner.filePath(".runner")); QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("{\"agentId\":42,\"agentName\":\"hybridflow-macos-arm64-long-runner-name-for-a-studio-machine\",\"gitHubUrl\":\"https://github.com/example/project\"}"); f.close();
+        TestPlatform p; TestRemote g; p.value.state=ServiceState::Running; p.value.observedAt=QDateTime::currentDateTimeUtc();
+        g.value.job=JobState::Running; g.value.jobId=1; g.value.observedAt=p.value.observedAt; g.value.jobName=QString("Long workflow name ").repeated(100);
+        Monitor m(p,g); QVERIFY(m.add(runner.path())); Window window(m,p); m.refresh();
+        auto* popup=window.findChild<RunnerPopover*>(); popup->present(QRect(400,40,20,20)); qApp->processEvents();
+        QVERIFY(popup->width()<=uiMetrics.popoverWidth); QVERIFY(popup->height()<=uiMetrics.popoverMaxHeight);
+        auto* scroll=popup->findChild<QScrollArea*>("popoverScroll"); QVERIFY(scroll); QVERIFY(scroll->verticalScrollBar()->maximum()>0);
+        QCOMPARE(scroll->horizontalScrollBar()->maximum(),0);
+    }
+    void settingsSaveAndCancelPreserveThemeIntentWithoutRequests() {
+        TestPlatform p; TestRemote g; Monitor m(p,g); Window window(m,p); theme().setPreference(ThemePreference::Light);
+        auto openSettings=[&window](bool save) {
+            QTimer::singleShot(0,&window,[save] {
+                if(auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget())) {
+                    dialog->findChild<QComboBox*>("themePreference")->setCurrentIndex(2);
+                    dialog->findChild<QDialogButtonBox*>()->button(save ? QDialogButtonBox::Save : QDialogButtonBox::Cancel)->click();
+                }
+            });
+            for(auto* button:window.findChildren<QPushButton*>()) if(button->text()=="Settings") { button->click(); break; }
+        };
+        openSettings(false); QCOMPARE(theme().preference(),ThemePreference::Light); QCOMPARE(QSettings().value("appearance").toString(),QString("light"));
+        openSettings(true); QCOMPARE(theme().preference(),ThemePreference::Dark); QCOMPARE(QSettings().value("appearance").toString(),QString("dark"));
+        QCOMPARE(g.calls,0); QCOMPARE(p.actions,0);
+    }
+    void settingsOffersSystemLightAndDarkAppearance() {
+        TestPlatform p; TestRemote g; Monitor m(p,g); Window window(m,p);
+        auto offered=std::make_shared<bool>(false);
+        QTimer::singleShot(0,&window,[offered] {
+            if(auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget())) {
+                if(auto* choice=dialog->findChild<QComboBox*>("themePreference")) *offered=choice->count()==3;
+                dialog->reject();
+            }
+        });
+        for(auto* button:window.findChildren<QPushButton*>()) if(button->text()=="Settings") { button->click(); break; }
+        QVERIFY(*offered);
+    }
     void popoverClampsToScreensAndChartsPreserveTimeUnitsAndGaps() {
         const QRect screen(-1440,-900,1440,860);
         const auto fitted=popoverGeometry(QSize(400,550),QRect(-5,-50,5,10),screen); QVERIFY(screen.contains(fitted));
@@ -132,6 +219,17 @@ private slots:
         popup->present(QRect(400,40,20,20)); QTest::qWait(50);
         QVERIFY(!popup->grab().isNull()); QCOMPARE(monitor.runners()[0].resources.size(),20);
         const auto output=qEnvironmentVariable("RUNPERCH_CAPTURE_POPUP"); if(!output.isEmpty()) QVERIFY(popup->grab().save(output));
+        const auto prefix=qEnvironmentVariable("RUNPERCH_CAPTURE_THEMES");
+        if(!prefix.isEmpty()) for(auto preference:{ThemePreference::Light,ThemePreference::Dark}) {
+            theme().setPreference(preference); popup->refresh(); qApp->processEvents();
+            const auto suffix=preference==ThemePreference::Dark ? "-dark" : "-light";
+            QVERIFY(popup->grab().save(prefix+suffix+"-popover.png"));
+            window.resize(1120,780); QVERIFY(window.grab().save(prefix+suffix+"-overview.png"));
+            QTimer::singleShot(0,&window,[prefix,suffix] {
+                if(auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget())) { dialog->grab().save(prefix+suffix+"-settings.png"); dialog->reject(); }
+            });
+            for(auto* button:window.findChildren<QPushButton*>()) if(button->text()=="Settings") { button->click(); break; }
+        }
         QTest::keyClick(popup,Qt::Key_Escape); QVERIFY(!popup->isVisible());
     }
     void popoverCurrentJobRechecksFreshnessAndIdentity() {
@@ -243,7 +341,8 @@ private slots:
             QVERIFY2(c.alpha()>240 && c.lightness()>210,"Dock icon has no visible light backing");
         }
         const auto mark=image.pixelColor(11,18);
-        QVERIFY(mark.alpha()>240 && mark.lightness()<100);
+        QVERIFY(mark.alpha()>240);
+        QVERIFY2(mark.blue()>mark.red() && mark.blue()>mark.green(),"App icon still uses the old green mark instead of blue");
     }
     void stalePresentationChangesWithoutNetworkRefresh() {
         QTemporaryDir runner;

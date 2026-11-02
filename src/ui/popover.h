@@ -16,14 +16,17 @@ public:
 protected:
     bool eventFilter(QObject*,QEvent*) override;
     void keyPressEvent(QKeyEvent*) override;
+    void paintEvent(QPaintEvent*) override;
 signals:
     void overviewRequested();
     void controlRequested(QString root,quint64 instance,ServiceAction);
     void currentJobRequested(QString root,quint64 instance);
 private:
     const Runner* selected() const;
+    void fitContent(QRect anchor);
     Monitor& monitor;
     QComboBox* selector;
+    QWidget* content;
     QLabel *state,*activity,*local,*timing,*cpu,*memory,*observed;
     MetricsChart *cpuChart,*memoryChart;
     QPushButton *start,*stop,*job;

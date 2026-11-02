@@ -143,3 +143,34 @@ The development bundle still depends on local Qt and optional gh installations.
 Windows/Linux native service metrics remain unimplemented. The shared GUI and
 contracts are cross-platform; macOS presentation validation does not certify
 those platforms or a self-contained/signed distribution.
+
+## 0.7.0 neutral themes, compact formatting and blue icon
+
+- Final local Release gate: all 7 CTest gates passed. Core: 69 and UI: 20 passed
+  without failures/skips; the full 20 UI entries also passed on Cocoa.
+- Missing appearance-setting regression failed before implementation. Settings
+  Save/Cancel and persistence, System resolution, live existing Window/panel/menu
+  and chart updates, long-text scrolling and transparent corners now pass.
+- Native rendering caught generic QSS overriding disabled checkbox text and
+  the Running color despite its palette reporting the expected color. Failing
+  regressions precede fixes; actual rendered pixels now pin status, disabled
+  text, chart and theme-tinted sidebar mark in both themes.
+- System transition uses the actual QStyleHints producer. Offscreen platforms
+  can report Unknown and cannot establish physical OS switching; the resolver
+  separately covers Dark/Light/Unknown and explicit-choice precedence.
+- Natural-height/top-aligned panel removes fixed-height whitespace. Long work
+  names stay within bounded geometry with vertical scrolling and no horizontal
+  overflow. Cocoa captures were visually inspected in light and dark modes.
+- The actual bundled/runtime icon changed to blue. The old-green regression
+  failed before replacement; both blue-family and light-backing checks pass.
+  ICNS was regenerated; its actual 64/128 pixel resources were visually checked.
+- Independent theme/visual/Settings source checks and final bundled-icon
+  review passed. No monitored service or GitHub authorization changed.
+- Previous 0.6 public CI passed macOS, Windows, Linux and workflow lint. The
+  new 0.7 three-platform results must be checked separately after publication.
+
+The Mac uses Qt 6.11.2. Qt 6.5–6.7 have no setColorScheme API: the shared theme
+works through palette/styles, with native chrome following OS appearance. Native
+Windows/Linux appearance and human physical theme switching remain unverified.
+The app remains a development bundle requiring local Qt, not a signed portable
+distribution.

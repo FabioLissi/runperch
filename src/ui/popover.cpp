@@ -1,5 +1,8 @@
 #include "ui/popover.h"
 #include "ui/display.h"
+#include "ui/theme.h"
+#include <QPainter>
+#include <QStyle>
 #include "ui/metrics_chart.h"
 #include <QComboBox>
 #include <QApplication>
@@ -29,36 +32,27 @@ QRect popoverGeometry(QSize size,QRect anchor,QRect screen) {
 }
 RunnerPopover::RunnerPopover(Monitor& m,QWidget* parent,Qt::WindowFlags flags):QFrame(parent,flags),monitor(m) {
     setObjectName("runnerPopover"); setWindowTitle("Runperch quick view"); setAttribute(Qt::WA_QuitOnClose,false);
-    setStyleSheet(R"(
-        QFrame#runnerPopover { background:#fbfaf7; border:1px solid #cdd8cc; border-radius:10px; }
-        QWidget { color:#19362d; font-size:13px; background:#fbfaf7; }
-        QLabel { background:transparent; }
-        QLabel#popoverBrand { font-size:18px; font-weight:700; }
-        QLabel#popoverState { color:#12654f; font-weight:650; font-size:15px; }
-        QLabel#popoverActivity { font-size:15px; font-weight:600; }
-        QLabel#popoverLocal, QLabel#popoverTiming, QLabel#popoverObserved, QLabel#historyCaption { color:#66776d; font-size:11px; }
-        QLabel#popoverCpu, QLabel#popoverMemory { font-size:15px; font-weight:650; }
-        QComboBox { background:#fffefa; border:1px solid #cbd7cd; border-radius:5px; padding:7px; }
-        QPushButton { background:#fffefa; border:1px solid #cbd7cd; border-radius:5px; padding:7px; }
-        QPushButton:hover { background:#e5eee6; } QPushButton:disabled { color:#98a49b; }
-        QPushButton#popoverStop { color:#a04d36; }
-        QScrollArea { border:0; background:transparent; }
-    )");
+    setAttribute(Qt::WA_TranslucentBackground);
+    connect(&theme(),&ThemeController::changed,this,[this] { refresh(); update(); });
     auto* outer=new QVBoxLayout(this); outer->setContentsMargins(1,1,1,1);
-    auto* scroll=new QScrollArea; scroll->setWidgetResizable(true); scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    auto* content=new QWidget; auto* column=new QVBoxLayout(content); column->setContentsMargins(18,16,18,16); column->setSpacing(12);
+    auto* scroll=new QScrollArea; scroll->setObjectName("popoverScroll"); scroll->viewport()->setObjectName("popoverViewport"); scroll->setWidgetResizable(true); scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    content=new QWidget; content->setObjectName("popoverContent"); auto* column=new QVBoxLayout(content);
+    column->setContentsMargins(uiMetrics.inset,uiMetrics.inset,uiMetrics.inset,uiMetrics.inset); column->setSpacing(uiMetrics.gap); column->setAlignment(Qt::AlignTop);
     auto* header=new QHBoxLayout; auto* brand=line("popoverBrand"); brand->setText("Runperch"); header->addWidget(brand); header->addStretch();
     auto* open=new QPushButton("Open overview ↗"); open->setObjectName("popoverOverview"); header->addWidget(open); column->addLayout(header);
     selector=new QComboBox; selector->setObjectName("popoverRunners"); selector->setAccessibleName("Runner"); selector->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon); selector->setMinimumContentsLength(10); column->addWidget(selector);
     state=line("popoverState"); activity=line("popoverActivity"); local=line("popoverLocal"); timing=line("popoverTiming");
-    for(auto* l:{state,activity,local,timing}) column->addWidget(l);
-    auto* charts=new QHBoxLayout; charts->setSpacing(16);
-    auto* cpuColumn=new QVBoxLayout; auto* memoryColumn=new QVBoxLayout;
+    auto* statusRow=new QHBoxLayout; statusRow->addWidget(state); statusRow->addStretch(); statusRow->addWidget(local);
+    column->addLayout(statusRow); column->addWidget(activity); column->addWidget(timing);
+    auto* charts=new QHBoxLayout; charts->setSpacing(uiMetrics.gap);
+    auto* cpuCard=new QFrame; cpuCard->setObjectName("metricCard"); auto* memoryCard=new QFrame; memoryCard->setObjectName("metricCard");
+    auto* cpuColumn=new QVBoxLayout(cpuCard); auto* memoryColumn=new QVBoxLayout(memoryCard);
+    for(auto* layout:{cpuColumn,memoryColumn}) { layout->setContentsMargins(uiMetrics.gap,uiMetrics.gap,uiMetrics.gap,uiMetrics.gap); layout->setSpacing(0); }
     cpu=line("popoverCpu"); memory=line("popoverMemory"); cpuChart=new MetricsChart(ResourceMetric::Cpu); memoryChart=new MetricsChart(ResourceMetric::Memory);
     cpuChart->setObjectName("cpuHistory"); memoryChart->setObjectName("memoryHistory");
     cpuColumn->addWidget(cpu); cpuColumn->addWidget(cpuChart); memoryColumn->addWidget(memory); memoryColumn->addWidget(memoryChart);
-    charts->addLayout(cpuColumn,1); charts->addLayout(memoryColumn,1); column->addLayout(charts);
-    auto* caption=line("historyCaption"); caption->setText("Last 15 minutes · recorded while open"); column->addWidget(caption);
+    charts->addWidget(cpuCard,1); charts->addWidget(memoryCard,1); column->addLayout(charts);
+    auto* caption=line("historyCaption"); caption->setText("15-minute history · fills while Runperch runs"); column->addWidget(caption);
     observed=line("popoverObserved"); column->addWidget(observed);
     job=new QPushButton("Open current job ↗"); job->setObjectName("popoverJob"); column->addWidget(job);
     auto* controls=new QHBoxLayout; start=new QPushButton("Start service"); stop=new QPushButton("Stop now…");
@@ -73,19 +67,33 @@ RunnerPopover::RunnerPopover(Monitor& m,QWidget* parent,Qt::WindowFlags flags):Q
     connect(stop,&QPushButton::clicked,this,[this] { if(auto* r=selected()) { auto root=r->registration.root; auto id=r->instanceId; hide(); emit controlRequested(root,id,ServiceAction::Stop); } });
     connect(job,&QPushButton::clicked,this,[this] { if(auto* r=selected()) emit currentJobRequested(r->registration.root,r->instanceId); });
     connect(&monitor,&Monitor::changed,this,&RunnerPopover::refresh);
-    qApp->installEventFilter(this); resize(400,550); refresh();
+    qApp->installEventFilter(this); resize(uiMetrics.popoverWidth,uiMetrics.popoverMaxHeight); refresh();
 }
 const Runner* RunnerPopover::selected() const {
     for(const auto& r:monitor.runners()) if(r.registration.root==selectedRoot && r.instanceId==selectedInstance) return &r;
     return nullptr;
 }
-void RunnerPopover::present(QRect anchor) {
-    refresh();
-    setProperty("trayAnchor",anchor);
+void RunnerPopover::fitContent(QRect anchor) {
     if(anchor.isEmpty()) anchor=QRect(QCursor::pos(),QSize(1,1));
     auto* screen=QGuiApplication::screenAt(anchor.center()); if(!screen) screen=QGuiApplication::primaryScreen();
-    if(screen) setGeometry(popoverGeometry(QSize(400,550),anchor,screen->availableGeometry()));
+    if(!screen) return;
+    ensurePolished(); content->ensurePolished(); content->layout()->activate();
+    const auto available=screen->availableGeometry(); const int width=qMin(uiMetrics.popoverWidth,available.width());
+    int height=content->layout()->totalHeightForWidth(width-2)+2;
+    if(height<2) height=content->sizeHint().height()+2;
+    if(height>qMin(uiMetrics.popoverMaxHeight,available.height())) {
+        height=content->layout()->totalHeightForWidth(width-2-style()->pixelMetric(QStyle::PM_ScrollBarExtent))+2;
+    }
+    setGeometry(popoverGeometry(QSize(width,qMin(height,uiMetrics.popoverMaxHeight)),anchor,available));
+}
+void RunnerPopover::present(QRect anchor) {
+    refresh(); setProperty("trayAnchor",anchor); fitContent(anchor);
     show(); raise(); selector->setFocus(Qt::PopupFocusReason);
+}
+void RunnerPopover::paintEvent(QPaintEvent*) {
+    QPainter painter(this); painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(theme().tokens().border); painter.setBrush(theme().tokens().background);
+    painter.drawRoundedRect(QRectF(rect()).adjusted(0.5,0.5,-0.5,-0.5),uiMetrics.panelRadius,uiMetrics.panelRadius);
 }
 void RunnerPopover::keyPressEvent(QKeyEvent* event) {
     if(event->key()==Qt::Key_Escape) { hide(); event->accept(); return; }
@@ -116,18 +124,20 @@ void RunnerPopover::refresh() {
             if(r.registration.root==selectedRoot && r.instanceId==selectedInstance) selection=selector->count()-1;
         }
         if(selection<0 && !monitor.runners().isEmpty()) { selection=0; selectedRoot=monitor.runners()[0].registration.root; selectedInstance=monitor.runners()[0].instanceId; }
-        selector->setCurrentIndex(selection); selector->setEnabled(selector->count()>1);
+        selector->setCurrentIndex(selection); selector->setEnabled(selector->count()>0);
     }
     const auto* r=selected();
     if(!r) { state->setText("No runners configured"); activity->setText("Add an existing runner in the overview."); local->clear(); timing->clear(); observed->clear(); cpu->setText("CPU avg —"); memory->setText("Memory —"); cpuChart->setSamples({}); memoryChart->setSamples({}); start->setEnabled(false); stop->setEnabled(false); job->setEnabled(false); return; }
     const auto now=QDateTime::currentDateTimeUtc(); const bool fresh=isFresh(r->service.observedAt,now);
     const bool active=isFresh(r->remote.observedAt,now) && r->remote.job==JobState::Running;
     state->setText(status(*r));
+    const auto tone=statusTone(status(*r));
+    if(state->property("tone").toString()!=tone) { state->setProperty("tone",tone); state->style()->unpolish(state); state->style()->polish(state); state->update(); }
     activity->setText(active && !r->remote.jobName.isEmpty() ? r->remote.jobName : text(localWorkState(r->service,now)));
     if(active && !r->remote.stepName.isEmpty()) activity->setText(activity->text()+"\n"+r->remote.stepName);
-    local->setText("Service: "+text(fresh ? r->service.state : ServiceState::Unknown)+" · Connection: "+text(isFresh(r->remote.observedAt,now) ? r->remote.connection : ConnectionState::Unknown));
+    local->setText("Connection: "+text(isFresh(r->remote.observedAt,now) ? r->remote.connection : ConnectionState::Unknown));
     local->setToolTip("Local service state and GitHub runner connection are separate. Connection can be unknown while read-only job information is available.");
-    timing->setText("Uptime "+(fresh && r->service.uptimeSeconds ? duration(*r->service.uptimeSeconds) : "—")+" · Job "+(active ? elapsed(r->remote.startedAt) : "—"));
+    timing->setText("Uptime "+(fresh && r->service.uptimeSeconds ? duration(*r->service.uptimeSeconds) : "—")+(active ? " · Job "+elapsed(r->remote.startedAt) : ""));
     const bool cpuValid=fresh && r->service.cpuCores && std::isfinite(*r->service.cpuCores) && *r->service.cpuCores>=0;
     cpu->setText(cpuValid ? QString("CPU avg %1 cores").arg(*r->service.cpuCores,0,'f',2) : "CPU avg —");
     memory->setText(fresh && r->service.rssBytes && *r->service.rssBytes>=0 ? QString("RSS %1 GiB").arg(*r->service.rssBytes/1073741824.0,0,'f',2) : "Memory —");
@@ -136,6 +146,7 @@ void RunnerPopover::refresh() {
     observed->setToolTip("CPU is a decaying process average; RSS may double-count shared pages. No worker observed does not prove connected Idle.");
     const auto a=canControl(*r,ServiceAction::Start,now), b=canControl(*r,ServiceAction::Stop,now,StopAuthorization::ConfirmedImmediate);
     start->setEnabled(a.allowed); start->setToolTip(a.reason); stop->setEnabled(b.allowed); stop->setToolTip(b.reason);
+    if(isVisible()) fitContent(property("trayAnchor").toRect());
     job->setEnabled(!currentJobUrl(*r,now).isEmpty()); job->setToolTip(job->isEnabled() ? "Open this active job in GitHub" : "A fresh active GitHub job observation is required; local worker activity has no job URL.");
 }
 }
