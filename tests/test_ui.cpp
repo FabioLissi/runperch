@@ -4,6 +4,13 @@
 #include "ui/display.h"
 #include "ui/theme.h"
 #include <QStyleHints>
+#include <QStyleOption>
+#include <algorithm>
+#include <cmath>
+#include <QSpinBox>
+#include <QScopeGuard>
+#include <QStyleFactory>
+#include <QPainter>
 #include <QCheckBox>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -27,6 +34,46 @@
 #include <QTest>
 using namespace runperch;
 namespace {
+// Font rasterizers may blend every glyph pixel. Validate the expected color's
+// compositing line instead of demanding a pixel with exactly 100% coverage.
+bool renderedTextUses(const QImage& image,QRect area,QColor ink,QColor background) {
+    const double delta[]{double(ink.red()-background.red()),double(ink.green()-background.green()),double(ink.blue()-background.blue())};
+    const double length=delta[0]*delta[0]+delta[1]*delta[1]+delta[2]*delta[2];
+    if(length==0) return false;
+    int observed=0,matched=0;
+    area=area.intersected(image.rect());
+    for(int y=area.top();y<=area.bottom();++y) for(int x=area.left();x<=area.right();++x) {
+        const auto c=image.pixelColor(x,y);
+        const double sample[]{double(c.red()-background.red()),double(c.green()-background.green()),double(c.blue()-background.blue())};
+        if(std::max({std::abs(sample[0]),std::abs(sample[1]),std::abs(sample[2])})<12) continue;
+        ++observed;
+        const double alpha=(sample[0]*delta[0]+sample[1]*delta[1]+sample[2]*delta[2])/length;
+        const double clipped=std::clamp(alpha,0.0,1.0);
+        const double residual=std::max({std::abs(sample[0]-clipped*delta[0]),std::abs(sample[1]-clipped*delta[1]),std::abs(sample[2]-clipped*delta[2])});
+        if(residual<=8) ++matched;
+    }
+    return observed>=10 && matched>=observed*0.95;
+}
+bool matchesStandardArrow(QWidget* widget,QRect area,QStyle::PrimitiveElement primitive,bool enabled=true) {
+    const auto image=widget->grab().toImage();
+    QImage expected(image.size(),QImage::Format_ARGB32_Premultiplied); expected.setDevicePixelRatio(image.devicePixelRatio()); expected.fill(Qt::transparent);
+    QPainter painter(&expected); QStyleOption option; option.initFrom(widget);
+    option.rect=QStyle::alignedRect(widget->layoutDirection(),Qt::AlignCenter,QSize(12,12),area);
+    if(!enabled) option.state&=~QStyle::State_Enabled;
+    std::unique_ptr<QStyle> reference(QStyleFactory::create("Fusion")); reference->drawPrimitive(primitive,&option,&painter); painter.end();
+    const auto dpr=image.devicePixelRatio();
+    const auto background=image.pixelColor(qRound(area.center().x()*dpr),qRound((area.top()+2)*dpr));
+    int ink=0,matched=0;
+    for(int y=0;y<image.height();++y) for(int x=0;x<image.width();++x) {
+        const auto target=expected.pixelColor(x,y); if(target.alpha()<50) continue;
+        ++ink; const auto actual=image.pixelColor(x,y); const auto alpha=target.alphaF();
+        const auto red=qRound(alpha*target.red()+(1-alpha)*background.red());
+        const auto green=qRound(alpha*target.green()+(1-alpha)*background.green());
+        const auto blue=qRound(alpha*target.blue()+(1-alpha)*background.blue());
+        if(std::max({std::abs(actual.red()-red),std::abs(actual.green()-green),std::abs(actual.blue()-blue)})<=2) ++matched;
+    }
+    return ink>=4 && matched==ink;
+}
 class TestPlatform final : public Platform {
 public:
     ServiceObservation value;
@@ -79,6 +126,64 @@ private slots:
         hints->setColorScheme(Qt::ColorScheme::Light); qApp->processEvents(); QCOMPARE(theme().isDark(),hints->colorScheme()==Qt::ColorScheme::Dark);
 #endif
     }
+    void settingsControlsHaveSeparatedThemedSubcontrols() {
+        TestPlatform p; TestRemote g; Monitor m(p,g); Window window(m,p);
+        auto checked=std::make_shared<bool>(false);
+        QTimer::singleShot(0,&window,[checked] {
+            auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog);
+            auto* combo=dialog->findChild<QComboBox*>("themePreference"); QVERIFY(combo);
+            auto* spin=dialog->findChild<QSpinBox*>(); QVERIFY(spin);
+            // Always close the modal even when an assertion returns early.
+            const auto close=qScopeGuard([dialog] {dialog->reject();});
+            for(auto preference:{ThemePreference::Light,ThemePreference::Dark}) {
+                theme().setPreference(preference); qApp->processEvents();
+                QStyleOptionComboBox c; c.initFrom(combo); c.rect=combo->rect(); c.editable=false;
+                QCOMPARE(combo->style()->styleHint(QStyle::SH_ComboBox_Popup,&c,combo),0);
+                QCOMPARE(combo->style()->styleHint(QStyle::SH_ComboBox_UseNativePopup,&c,combo),0);
+                const auto arrow=combo->style()->subControlRect(QStyle::CC_ComboBox,&c,QStyle::SC_ComboBoxArrow,combo);
+                const auto text=combo->style()->subControlRect(QStyle::CC_ComboBox,&c,QStyle::SC_ComboBoxEditField,combo);
+                QVERIFY(arrow.width()>=24); QVERIFY(!arrow.intersects(text));
+                QVERIFY(matchesStandardArrow(combo,arrow,QStyle::PE_IndicatorArrowDown));
+                combo->setEnabled(false); QVERIFY(matchesStandardArrow(combo,arrow,QStyle::PE_IndicatorArrowDown)); combo->setEnabled(true);
+                QStyleOptionSpinBox b; b.initFrom(spin); b.rect=spin->rect(); b.frame=true;
+                b.buttonSymbols=QAbstractSpinBox::UpDownArrows;
+                const auto up=spin->style()->subControlRect(QStyle::CC_SpinBox,&b,QStyle::SC_SpinBoxUp,spin);
+                const auto down=spin->style()->subControlRect(QStyle::CC_SpinBox,&b,QStyle::SC_SpinBoxDown,spin);
+                const auto edit=spin->style()->subControlRect(QStyle::CC_SpinBox,&b,QStyle::SC_SpinBoxEditField,spin);
+                QVERIFY(up.width()>=24); QVERIFY(down.width()>=24);
+                QVERIFY(!up.intersects(edit)); QVERIFY(!down.intersects(edit)); QVERIFY(!up.intersects(down));
+                QVERIFY(up.top()>0); QVERIFY(down.bottom()<spin->height()-1);
+                QVERIFY(matchesStandardArrow(spin,up,QStyle::PE_IndicatorArrowUp));
+                QVERIFY(matchesStandardArrow(spin,down,QStyle::PE_IndicatorArrowDown));
+                spin->setValue(15); QTest::mouseClick(spin,Qt::LeftButton,Qt::NoModifier,up.center()); QCOMPARE(spin->value(),16);
+                QTest::mouseClick(spin,Qt::LeftButton,Qt::NoModifier,down.center()); QCOMPARE(spin->value(),15);
+                spin->setFocus(); QTest::keyClick(spin,Qt::Key_Up); QCOMPARE(spin->value(),16);
+                spin->setValue(spin->maximum()); QVERIFY(matchesStandardArrow(spin,up,QStyle::PE_IndicatorArrowUp,false)); QTest::mouseClick(spin,Qt::LeftButton,Qt::NoModifier,up.center()); QCOMPARE(spin->value(),spin->maximum());
+                spin->setValue(spin->minimum()); QVERIFY(matchesStandardArrow(spin,down,QStyle::PE_IndicatorArrowDown,false)); QTest::mouseClick(spin,Qt::LeftButton,Qt::NoModifier,down.center()); QCOMPARE(spin->value(),spin->minimum());
+                spin->setValue(15); spin->setEnabled(false);
+                QVERIFY(matchesStandardArrow(spin,up,QStyle::PE_IndicatorArrowUp));
+                QVERIFY(matchesStandardArrow(spin,down,QStyle::PE_IndicatorArrowDown));
+                QTest::mouseClick(spin,Qt::LeftButton,Qt::NoModifier,up.center()); QCOMPARE(spin->value(),15); spin->setEnabled(true);
+                const auto prefix=qEnvironmentVariable("RUNPERCH_CAPTURE_CONTROLS");
+                const auto suffix=preference==ThemePreference::Dark ? "-dark" : "-light";
+                if(!prefix.isEmpty()) QVERIFY(dialog->grab().save(prefix+suffix+"-settings.png"));
+                combo->setCurrentIndex(0); combo->showPopup(); qApp->processEvents(); QVERIFY(combo->view()->isVisible());
+                if(!prefix.isEmpty()) QVERIFY(combo->view()->window()->grab().save(prefix+suffix+"-choices.png"));
+                QVERIFY(combo->view()->viewport()->mapToGlobal(QPoint(0,0)).y()>=combo->mapToGlobal(QPoint(0,combo->height())).y());
+                if(!prefix.isEmpty()) QVERIFY(combo->view()->window()->grab().save(prefix+suffix+"-choices.png"));
+                QTest::keyClick(combo->view(),Qt::Key_Down); QTest::keyClick(combo->view(),Qt::Key_Enter); QCOMPARE(combo->currentIndex(),1);
+                combo->showPopup(); QTest::keyClick(combo->view(),Qt::Key_Escape); QCOMPARE(combo->currentIndex(),1);
+                QVERIFY(!combo->view()->isVisible());
+                combo->showPopup(); qApp->processEvents();
+                const auto item=combo->model()->index(2,0); const auto choice=combo->view()->visualRect(item);
+                QVERIFY(choice.isValid()); QTest::mouseClick(combo->view()->viewport(),Qt::LeftButton,Qt::NoModifier,choice.center());
+                QCOMPARE(combo->currentIndex(),2); QVERIFY(!combo->view()->isVisible());
+            }
+            *checked=true;
+        });
+        for(auto* button:window.findChildren<QPushButton*>()) if(button->text()=="Settings") { button->click(); break; }
+        QVERIFY(*checked); QCOMPARE(g.calls,0); QCOMPARE(p.actions,0);
+    }
     void liveThemeReachesRealWindowPopoverMenusAndChartWithoutQueries() {
         QTemporaryDir runner; QFile f(runner.filePath(".runner")); QVERIFY(f.open(QIODevice::WriteOnly));
         f.write("{\"agentId\":42,\"agentName\":\"theme-runner\",\"gitHubUrl\":\"https://github.com/example/project\"}"); f.close();
@@ -98,11 +203,18 @@ private slots:
             auto logoImage=window.findChild<QLabel*>("logo")->pixmap().toImage(); int logoPixels=0;
             for(int y=0;y<logoImage.height();++y) for(int x=0;x<logoImage.width();++x) if(logoImage.pixelColor(x,y).rgb()==t.accent.rgb()) ++logoPixels;
             QVERIFY2(logoPixels>0,"Sidebar brand mark does not consume the current theme accent");
-            QCheckBox disabled("Unavailable setting",&window); disabled.setEnabled(false); disabled.show(); disabled.ensurePolished();
+            QCheckBox disabled("Unavailable setting",&window); disabled.setEnabled(false); disabled.show(); disabled.ensurePolished(); disabled.adjustSize();
             QCOMPARE(disabled.palette().color(QPalette::Disabled,QPalette::WindowText),t.disabled);
-            auto disabledImage=disabled.grab().toImage(); int disabledPixels=0;
-            for(int y=0;y<disabledImage.height();++y) for(int x=0;x<disabledImage.width();++x) if(disabledImage.pixelColor(x,y).rgb()==t.disabled.rgb()) ++disabledPixels;
-            QVERIFY(disabledPixels>0);
+            QStyleOptionButton check; check.initFrom(&disabled); check.rect=disabled.rect();
+            const auto contents=disabled.style()->subElementRect(QStyle::SE_CheckBoxContents,&check,&disabled);
+            auto disabledImage=disabled.grab().toImage();
+            const auto dpr=disabledImage.devicePixelRatio();
+            const QRect physical(qRound(contents.x()*dpr),qRound(contents.y()*dpr),qRound(contents.width()*dpr),qRound(contents.height()*dpr));
+            QVERIFY(renderedTextUses(disabledImage,physical,t.disabled,t.background));
+            // Deliberately break the actual consumer: the raster gate must reject it.
+            disabled.setStyleSheet("QCheckBox:disabled {color:magenta;}");
+            QVERIFY(!renderedTextUses(disabled.grab().toImage(),physical,t.disabled,t.background));
+            disabled.setStyleSheet({});
             auto image=popup->findChild<QWidget*>("cpuHistory")->grab().toImage(); int accentPixels=0;
             for(int y=0;y<image.height();++y) for(int x=0;x<image.width();++x) if(image.pixelColor(x,y).rgb()==t.accent.rgb()) ++accentPixels;
             QVERIFY(accentPixels>0); QCOMPARE(g.calls,0); QCOMPARE(p.actions,0);
@@ -195,7 +307,14 @@ private slots:
         selector->setCurrentIndex(1); QCOMPARE(selector->currentText(),QString("second"));
         QSignalSpy resets(selector->model(),&QAbstractItemModel::rowsRemoved);
         popup->present(QRect(400,40,20,20)); selector->showPopup(); QVERIFY(selector->view()->isVisible());
-        popup->refresh(); QCOMPARE(resets.count(),0); QVERIFY(selector->view()->isVisible()); selector->hidePopup(); popup->hide();
+        popup->refresh(); QCOMPARE(resets.count(),0); QVERIFY(selector->view()->isVisible());
+        QVERIFY(selector->view()->viewport()->mapToGlobal(QPoint(0,0)).y()>=selector->mapToGlobal(QPoint(0,selector->height())).y());
+        const auto prefix=qEnvironmentVariable("RUNPERCH_CAPTURE_CONTROLS");
+        if(!prefix.isEmpty()) {
+            QVERIFY(popup->grab().save(prefix+"-runner-field.png"));
+            QVERIFY(selector->view()->window()->grab().save(prefix+"-runner-choices.png"));
+        }
+        selector->hidePopup(); popup->hide();
         auto accepted=std::make_shared<bool>(false);
         QTimer::singleShot(0,&window,[&monitor,&second,accepted] {
             monitor.remove(1); *accepted=monitor.add(second.path()); monitor.refresh(true);

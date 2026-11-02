@@ -1,3 +1,4 @@
+#include "ui/themed_controls.h"
 #include "ui/window.h"
 #include "ui/popover.h"
 #include "ui/display.h"
@@ -291,9 +292,9 @@ void Window::controlRunner(QString root,quint64 instance,ServiceAction action) {
 }
 void Window::settings() {
     QDialog dialog(this); dialog.setWindowTitle("Runperch settings"); auto* layout=new QVBoxLayout(&dialog);
-    auto* form=new QFormLayout; auto* seconds=new QSpinBox; seconds->setRange(5,3600); seconds->setSuffix(" seconds"); seconds->setValue(savedRefreshInterval());
+    auto* form=new QFormLayout; auto* seconds=new ThemedSpinBox; seconds->setRange(5,3600); seconds->setSuffix(" seconds"); seconds->setValue(savedRefreshInterval());
     form->addRow("Refresh interval",seconds);
-    auto* appearance=new QComboBox; appearance->setObjectName("themePreference");
+    auto* appearance=new ThemedComboBox; appearance->setObjectName("themePreference");
     appearance->addItems({"System","Light","Dark"}); appearance->setCurrentIndex(static_cast<int>(theme().preference()));
     form->addRow("Appearance",appearance); layout->addLayout(form);
     QCheckBox* hideDock=nullptr;

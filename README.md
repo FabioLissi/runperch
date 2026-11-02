@@ -53,7 +53,7 @@ Click a thumbnail to see the full image.
   </tr>
 </table>
 
-Actual version 0.7.0 Qt interface, captured with scripted example data.
+Actual version 0.7.1 Qt interface, captured with scripted example data.
 [Overview](assets/screenshots/macos-dark-overview.png) and
 [appearance settings](assets/screenshots/macos-dark-settings.png) use the same
 shared tokens. Public screenshots contain no personal runner configuration or

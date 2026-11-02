@@ -3,6 +3,7 @@
 #include <QColor>
 #include <QPixmap>
 #include <Qt>
+class QStyle;
 namespace runperch {
 enum class ThemePreference { System, Light, Dark };
 struct ThemeTokens {
@@ -23,6 +24,7 @@ public:
     ThemePreference preference() const { return choice; }
     bool isDark() const { return dark; }
     const ThemeTokens& tokens() const { return current; }
+    QStyle& widgetBaseStyle() const { return *baseStyle; }
     void setPreference(ThemePreference);
 signals:
     void changed();
@@ -31,6 +33,7 @@ private:
     ThemePreference choice=ThemePreference::System;
     bool dark=false;
     ThemeTokens current;
+    QStyle* baseStyle=nullptr; // Owned by QApplication, beneath the stylesheet wrapper.
 };
 ThemeController& theme();
 QString statusTone(const QString& status);

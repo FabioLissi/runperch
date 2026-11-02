@@ -5,6 +5,7 @@
 #include <QPainter>
 #include <QSettings>
 #include <QStyleHints>
+#include <QStyleFactory>
 namespace runperch {
 ThemeTokens themeTokens(bool dark) {
     if(dark) return {
@@ -53,7 +54,20 @@ QString stylesheet(const ThemeTokens& t) {
         QMenu::item:disabled { color:@disabled@; }
         QComboBox, QLineEdit, QSpinBox { background:@surface@; border:1px solid @border@; border-radius:@radius@px; padding:@gap@px; selection-background-color:@selection@; selection-color:@selectedText@; }
         QComboBox:disabled, QLineEdit:disabled, QSpinBox:disabled { color:@disabled@; background:@disabledBackground@; }
-        QComboBox QAbstractItemView { background:@surface@; color:@text@; selection-background-color:@selection@; selection-color:@selectedText@; }
+        QComboBox { padding-right:36px; combobox-popup:0; }
+        QComboBox::drop-down { subcontrol-origin:padding; subcontrol-position:top right; width:28px; border:none; background:transparent; border-top-right-radius:@radius@px; border-bottom-right-radius:@radius@px; }
+        QComboBox::drop-down:hover { background:@hover@; }
+        QComboBox::drop-down:on { background:@selection@; }
+        QComboBox::drop-down:disabled { background:transparent; }
+        QComboBox QAbstractItemView { background:@surface@; color:@text@; border:1px solid @border@; padding:4px; outline:none; selection-background-color:@selection@; selection-color:@selectedText@; }
+        QComboBox QAbstractItemView::item { min-height:28px; padding:2px 8px; border:none; }
+        QSpinBox { padding-right:36px; }
+        QSpinBox::up-button, QSpinBox::down-button { subcontrol-origin:padding; width:28px; border:none; background:transparent; }
+        QSpinBox::up-button { subcontrol-position:top right; border-top-right-radius:@radius@px; }
+        QSpinBox::down-button { subcontrol-position:bottom right; border-bottom-right-radius:@radius@px; }
+        QSpinBox::up-button:hover, QSpinBox::down-button:hover { background:@hover@; }
+        QSpinBox::up-button:pressed, QSpinBox::down-button:pressed { background:@selection@; }
+        QSpinBox::up-button:disabled, QSpinBox::down-button:disabled { background:transparent; }
         QToolTip { color:@text@; background:@surface@; border:1px solid @border@; padding:@gap@px; }
         QFrame#runnerPopover { background:transparent; border:none; }
         QWidget#popoverContent, QWidget#popoverViewport, QScrollArea#popoverScroll { background:transparent; border:none; }
@@ -79,6 +93,9 @@ QString stylesheet(const ThemeTokens& t) {
 }
 }
 ThemeController::ThemeController(QObject* parent):QObject(parent) {
+    // One portable widget base prevents native subcontrols leaking through QSS.
+    // QApplication owns the style; install it once, before applying theme rules.
+    baseStyle=QStyleFactory::create("Fusion"); qApp->setStyle(baseStyle);
     setObjectName("applicationTheme"); const auto saved=QSettings().value("appearance","system").toString();
     choice=saved=="dark" ? ThemePreference::Dark : saved=="light" ? ThemePreference::Light : ThemePreference::System;
     connect(QGuiApplication::styleHints(),&QStyleHints::colorSchemeChanged,this,[this] { if(choice==ThemePreference::System) apply(); });

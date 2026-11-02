@@ -1,3 +1,4 @@
+#include "ui/themed_controls.h"
 #include "ui/popover.h"
 #include "ui/display.h"
 #include "ui/theme.h"
@@ -40,7 +41,7 @@ RunnerPopover::RunnerPopover(Monitor& m,QWidget* parent,Qt::WindowFlags flags):Q
     column->setContentsMargins(uiMetrics.inset,uiMetrics.inset,uiMetrics.inset,uiMetrics.inset); column->setSpacing(uiMetrics.gap); column->setAlignment(Qt::AlignTop);
     auto* header=new QHBoxLayout; auto* brand=line("popoverBrand"); brand->setText("Runperch"); header->addWidget(brand); header->addStretch();
     auto* open=new QPushButton("Open overview ↗"); open->setObjectName("popoverOverview"); header->addWidget(open); column->addLayout(header);
-    selector=new QComboBox; selector->setObjectName("popoverRunners"); selector->setAccessibleName("Runner"); selector->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon); selector->setMinimumContentsLength(10); column->addWidget(selector);
+    selector=new ThemedComboBox; selector->setObjectName("popoverRunners"); selector->setAccessibleName("Runner"); selector->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon); selector->setMinimumContentsLength(10); column->addWidget(selector);
     state=line("popoverState"); activity=line("popoverActivity"); local=line("popoverLocal"); timing=line("popoverTiming");
     auto* statusRow=new QHBoxLayout; statusRow->addWidget(state); statusRow->addStretch(); statusRow->addWidget(local);
     column->addLayout(statusRow); column->addWidget(activity); column->addWidget(timing);

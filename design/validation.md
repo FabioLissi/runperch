@@ -174,3 +174,30 @@ works through palette/styles, with native chrome following OS appearance. Native
 Windows/Linux appearance and human physical theme switching remain unverified.
 The app remains a development bundle requiring local Qt, not a signed portable
 distribution.
+
+## 0.7.1 shared control rendering and portable test diagnostics
+
+- The Cocoa regression failed on the original overlapping combo menu hint. A
+  separate raster regression failed when the styled control lacked its standard
+  arrow. Shared paint adapters restore Qt Fusion's existing arrow primitive;
+  geometry and actual arrow raster now pass in light/dark, disabled and min/max
+  states. No custom input, dropdown, spin-step or accessibility behavior is used.
+- Real Settings controls verify arrow clicks, keyboard steps, numeric bounds,
+  keyboard and mouse selection, Escape and popup content below the field. The
+  real runner chooser stays open without model changes during refresh.
+- Local Release CTest: 7/7 passed; core 69 and UI 21 passed without failures or
+  skips. Full Cocoa UI: 21 passed. Native nonactivating panel and bundle gates
+  remain intact. Light/dark captures of the real widgets were visually checked.
+- Previous public 0.7 CI passed macOS/lint and failed UI on Linux/Windows. Linux
+  reports an exact-color disabled-text assertion; Windows did not expose its UI
+  detail. The raster gate now checks alpha-composited text rather than requiring
+  a fully covered glyph pixel, and deliberately rendering magenta must fail it.
+  The UI report is now persisted and printed separately, including on Windows.
+- Workflow lint 1.7.12 and whitespace checks pass. Native Windows/Linux results
+  for this correction must be checked separately after publication; their prior
+  UI failure is not silently treated as fixed by a Mac pass.
+
+Independent source/reference/visual review cleared this correction and reran
+focused tests on both offscreen and Cocoa backends (5 entries each, no skips).
+No live runner service, authentication or stored runner catalog was changed.
+The local app is still a development bundle requiring installed Qt.

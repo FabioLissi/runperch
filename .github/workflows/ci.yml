@@ -53,6 +53,9 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: ctest --test-dir build --build-config Release --output-on-failure
+      - name: UI test report
+        if: always()
+        run: cmake -E cat build/ui-results.txt
       - name: Core test report
         if: always()
         run: cmake -E cat build/core-results.txt
