@@ -21,7 +21,16 @@
 #include <cmath>
 namespace runperch {
 namespace {
-QLabel* line(QString name) { auto* l=new QLabel; l->setObjectName(name); l->setTextFormat(Qt::PlainText); l->setWordWrap(true); return l; }
+// Wrapped text may shrink below its longest word while retaining its natural
+// preferred width and height-for-width. Ignored sizing would collapse labels
+// beside stretches; hiding a scrollbar alone would clip oversized content.
+class WrappedLabel final : public QLabel {
+public:
+    QSize minimumSizeHint() const override {
+        auto size=QLabel::minimumSizeHint(); size.setWidth(0); return size;
+    }
+};
+QLabel* line(QString name) { auto* l=new WrappedLabel; l->setObjectName(name); l->setTextFormat(Qt::PlainText); l->setWordWrap(true); return l; }
 }
 QRect popoverGeometry(QSize size,QRect anchor,QRect screen) {
     size=size.boundedTo(screen.size());

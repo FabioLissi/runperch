@@ -34,25 +34,27 @@
 #include <QTest>
 using namespace runperch;
 namespace {
-// Font rasterizers may blend every glyph pixel. Validate the expected color's
-// compositing line instead of demanding a pixel with exactly 100% coverage.
-bool renderedTextUses(const QImage& image,QRect area,QColor ink,QColor background) {
-    const double delta[]{double(ink.red()-background.red()),double(ink.green()-background.green()),double(ink.blue()-background.blue())};
-    const double length=delta[0]*delta[0]+delta[1]*delta[1]+delta[2]*delta[2];
-    if(length==0) return false;
-    int observed=0,matched=0;
-    area=area.intersected(image.rect());
-    for(int y=area.top();y<=area.bottom();++y) for(int x=area.left();x<=area.right();++x) {
-        const auto c=image.pixelColor(x,y);
-        const double sample[]{double(c.red()-background.red()),double(c.green()-background.green()),double(c.blue()-background.blue())};
-        if(std::max({std::abs(sample[0]),std::abs(sample[1]),std::abs(sample[2])})<12) continue;
-        ++observed;
-        const double alpha=(sample[0]*delta[0]+sample[1]*delta[1]+sample[2]*delta[2])/length;
-        const double clipped=std::clamp(alpha,0.0,1.0);
-        const double residual=std::max({std::abs(sample[0]-clipped*delta[0]),std::abs(sample[1]-clipped*delta[1]),std::abs(sample[2]-clipped*delta[2])});
-        if(residual<=8) ++matched;
+// Use a real Qt reference widget: LCD subpixel coverage differs between the
+// widget backing store and QPainter drawing to a standalone image on Linux.
+bool matchesExpectedCheckBoxText(QCheckBox* widget,QColor expectedInk) {
+    const auto actual=widget->grab().toImage();
+    QCheckBox reference(widget->text(),widget->parentWidget());
+    reference.setFont(widget->font()); reference.setEnabled(widget->isEnabled());
+    reference.setCheckState(widget->checkState()); reference.setGeometry(widget->geometry());
+    reference.setStyleSheet(QString("QCheckBox {color:%1;}").arg(expectedInk.name()));
+    reference.ensurePolished(); reference.show();
+    const auto expected=reference.grab().toImage();
+    QStyleOptionButton option; option.initFrom(&reference); option.rect=reference.rect(); option.text=reference.text();
+    const auto logical=reference.style()->subElementRect(QStyle::SE_CheckBoxContents,&option,&reference);
+    const auto dpr=actual.devicePixelRatio();
+    const QRect physical(qRound(logical.x()*dpr),qRound(logical.y()*dpr),qRound(logical.width()*dpr),qRound(logical.height()*dpr));
+    int ink=0; const auto background=qApp->palette().color(QPalette::Window).rgb();
+    for(int y=physical.top();y<=physical.bottom();++y) for(int x=physical.left();x<=physical.right();++x) {
+        const auto target=expected.pixelColor(x,y); if(target.rgb()!=background) ++ink;
+        const auto pixel=actual.pixelColor(x,y);
+        if(std::max({std::abs(pixel.red()-target.red()),std::abs(pixel.green()-target.green()),std::abs(pixel.blue()-target.blue())})>2) return false;
     }
-    return observed>=10 && matched>=observed*0.95;
+    return ink>=10;
 }
 bool matchesStandardArrow(QWidget* widget,QRect area,QStyle::PrimitiveElement primitive,bool enabled=true) {
     const auto image=widget->grab().toImage();
@@ -205,15 +207,10 @@ private slots:
             QVERIFY2(logoPixels>0,"Sidebar brand mark does not consume the current theme accent");
             QCheckBox disabled("Unavailable setting",&window); disabled.setEnabled(false); disabled.show(); disabled.ensurePolished(); disabled.adjustSize();
             QCOMPARE(disabled.palette().color(QPalette::Disabled,QPalette::WindowText),t.disabled);
-            QStyleOptionButton check; check.initFrom(&disabled); check.rect=disabled.rect();
-            const auto contents=disabled.style()->subElementRect(QStyle::SE_CheckBoxContents,&check,&disabled);
-            auto disabledImage=disabled.grab().toImage();
-            const auto dpr=disabledImage.devicePixelRatio();
-            const QRect physical(qRound(contents.x()*dpr),qRound(contents.y()*dpr),qRound(contents.width()*dpr),qRound(contents.height()*dpr));
-            QVERIFY(renderedTextUses(disabledImage,physical,t.disabled,t.background));
+            QVERIFY(matchesExpectedCheckBoxText(&disabled,t.disabled));
             // Deliberately break the actual consumer: the raster gate must reject it.
             disabled.setStyleSheet("QCheckBox:disabled {color:magenta;}");
-            QVERIFY(!renderedTextUses(disabled.grab().toImage(),physical,t.disabled,t.background));
+            QVERIFY(!matchesExpectedCheckBoxText(&disabled,t.disabled));
             disabled.setStyleSheet({});
             auto image=popup->findChild<QWidget*>("cpuHistory")->grab().toImage(); int accentPixels=0;
             for(int y=0;y<image.height();++y) for(int x=0;x<image.width();++x) if(image.pixelColor(x,y).rgb()==t.accent.rgb()) ++accentPixels;
@@ -223,31 +220,78 @@ private slots:
         const auto image=popup->grab().toImage(); QVERIFY(image.pixelColor(0,0).alpha()<10);
         QVERIFY(popup->height()<500);
     }
+    void compactLayoutWrapsLongWorkAndKeepsActionsScrollable_data() {
+        QTest::addColumn<int>("labelPixels");
+        QTest::newRow("platform-font")<<13;
+        QTest::newRow("large-font")<<18;
+    }
     void compactLayoutWrapsLongWorkAndKeepsActionsScrollable() {
+        QFETCH(int,labelPixels);
         QTemporaryDir runner; QFile f(runner.filePath(".runner")); QVERIFY(f.open(QIODevice::WriteOnly));
         f.write("{\"agentId\":42,\"agentName\":\"hybridflow-macos-arm64-long-runner-name-for-a-studio-machine\",\"gitHubUrl\":\"https://github.com/example/project\"}"); f.close();
         TestPlatform p; TestRemote g; p.value.state=ServiceState::Running; p.value.observedAt=QDateTime::currentDateTimeUtc();
-        g.value.job=JobState::Running; g.value.jobId=1; g.value.observedAt=p.value.observedAt; g.value.jobName=QString("Long workflow name ").repeated(100);
+        g.value.job=JobState::Running; g.value.jobId=1; g.value.observedAt=p.value.observedAt; g.value.jobName=QString("Long workflow name ").repeated(100)+"\n"+QString(96,'W');
         Monitor m(p,g); QVERIFY(m.add(runner.path())); Window window(m,p); m.refresh();
-        auto* popup=window.findChild<RunnerPopover*>(); popup->present(QRect(400,40,20,20)); qApp->processEvents();
+        auto* popup=window.findChild<RunnerPopover*>(); if(labelPixels!=13) popup->setStyleSheet(QString("QLabel {font: %1px monospace;}").arg(labelPixels)); popup->present(QRect(400,40,20,20)); qApp->processEvents();
         QVERIFY(popup->width()<=uiMetrics.popoverWidth); QVERIFY(popup->height()<=uiMetrics.popoverMaxHeight);
         auto* scroll=popup->findChild<QScrollArea*>("popoverScroll"); QVERIFY(scroll); QVERIFY(scroll->verticalScrollBar()->maximum()>0);
         QCOMPARE(scroll->horizontalScrollBar()->maximum(),0);
     }
-    void settingsSaveAndCancelPreserveThemeIntentWithoutRequests() {
-        TestPlatform p; TestRemote g; Monitor m(p,g); Window window(m,p); theme().setPreference(ThemePreference::Light);
-        auto openSettings=[&window](bool save) {
-            QTimer::singleShot(0,&window,[save] {
-                if(auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget())) {
-                    dialog->findChild<QComboBox*>("themePreference")->setCurrentIndex(2);
-                    dialog->findChild<QDialogButtonBox*>()->button(save ? QDialogButtonBox::Save : QDialogButtonBox::Cancel)->click();
-                }
-            });
-            for(auto* button:window.findChildren<QPushButton*>()) if(button->text()=="Settings") { button->click(); break; }
-        };
-        openSettings(false); QCOMPARE(theme().preference(),ThemePreference::Light); QCOMPARE(QSettings().value("appearance").toString(),QString("light"));
-        openSettings(true); QCOMPARE(theme().preference(),ThemePreference::Dark); QCOMPARE(QSettings().value("appearance").toString(),QString("dark"));
-        QCOMPARE(g.calls,0); QCOMPARE(p.actions,0);
+    void settingsApplyAndPersistImmediatelyWithoutRequests() {
+        TestPlatform p; TestRemote g; Monitor m(p,g); TestPresentation presence; Window window(m,p,nullptr,&presence);
+        theme().setPreference(ThemePreference::Light);
+        auto checked=std::make_shared<bool>(false);
+        QTimer::singleShot(0,&window,[&g,&p,checked] {
+            auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog);
+            const auto close=qScopeGuard([dialog]{dialog->reject();});
+            auto* choice=dialog->findChild<QComboBox*>("themePreference"); QVERIFY(choice);
+            choice->setCurrentIndex(2);
+            QCOMPARE(theme().preference(),ThemePreference::Dark);
+            QCOMPARE(dialog->palette().color(QPalette::WindowText),theme().tokens().text);
+            QCOMPARE(QSettings().value("appearance").toString(),QString("dark"));
+            auto* seconds=dialog->findChild<QSpinBox*>(); QVERIFY(seconds); seconds->setValue(30);
+            QCOMPARE(QSettings().value("refreshSeconds").toInt(),30);
+            auto* dock=dialog->findChild<QCheckBox*>("hideDockWhenClosed"); QVERIFY(dock); dock->setChecked(false);
+            QVERIFY(!QSettings().value("hideDockWhenClosed",true).toBool());
+            QCOMPARE(g.calls,0); QCOMPARE(p.actions,0);
+            const auto buttons=dialog->findChild<QDialogButtonBox*>()->standardButtons();
+            QCOMPARE(buttons,QDialogButtonBox::StandardButtons(QDialogButtonBox::Close));
+            *checked=true;
+        });
+        for(auto* button:window.findChildren<QPushButton*>()) if(button->text()=="Settings") {button->click();break;}
+        QVERIFY(*checked); QCOMPARE(theme().preference(),ThemePreference::Dark);
+        *checked=false;
+        QTimer::singleShot(0,&window,[checked] {
+            auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog);
+            const auto close=qScopeGuard([dialog]{dialog->reject();});
+            QCOMPARE(dialog->findChild<QComboBox*>("themePreference")->currentIndex(),2);
+            QCOMPARE(dialog->findChild<QSpinBox*>()->value(),30);
+            QVERIFY(!dialog->findChild<QCheckBox*>("hideDockWhenClosed")->isChecked());
+            *checked=true;
+        });
+        for(auto* button:window.findChildren<QPushButton*>()) if(button->text()=="Settings") {button->click();break;}
+        QVERIFY(*checked); QCOMPARE(g.calls,0); QCOMPARE(p.actions,0);
+    }
+    void settingsOnlyQueryOnActualManagementChoiceChange() {
+        QTemporaryDir runner; QFile f(runner.filePath(".runner")); QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("{\"agentId\":42,\"agentName\":\"preferences-runner\",\"gitHubUrl\":\"https://github.com/example/project\"}"); f.close();
+        TestPlatform p; TestRemote g; Monitor m(p,g); QVERIFY(m.add(runner.path())); Window window(m,p);
+        auto checked=std::make_shared<bool>(false);
+        QTimer::singleShot(0,&window,[&g,&p,checked] {
+            auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog);
+            const auto close=qScopeGuard([dialog]{dialog->reject();});
+            QCOMPARE(g.calls,0);
+            auto* setting=dialog->findChild<QCheckBox*>("runnerManagementStatus"); QVERIFY(setting);
+            setting->setChecked(true); QCOMPARE(g.calls,1); QVERIFY(QSettings().value("runnerManagementStatus").toBool());
+            setting->setChecked(true); QCOMPARE(g.calls,1);
+            setting->setChecked(false); QCOMPARE(g.calls,2); QVERIFY(!QSettings().value("runnerManagementStatus").toBool());
+            auto* appearance=dialog->findChild<QComboBox*>("themePreference");
+            appearance->setCurrentIndex(2); QSignalSpy noOp(&theme(),&ThemeController::changed);
+            theme().setPreference(ThemePreference::Dark); QCOMPARE(noOp.count(),0); QCOMPARE(g.calls,2); QCOMPARE(p.actions,0);
+            *checked=true;
+        });
+        for(auto* button:window.findChildren<QPushButton*>()) if(button->text()=="Settings") {button->click();break;}
+        QVERIFY(*checked);
     }
     void settingsOffersSystemLightAndDarkAppearance() {
         TestPlatform p; TestRemote g; Monitor m(p,g); Window window(m,p);

@@ -83,3 +83,35 @@ remain in the platform adapter.
 Arrow conformance: real fields must match the Qt Fusion primitive raster in both
 themes (including disabled/bound states). The popup content viewport must start
 below the field; Qt intentionally shares the one-pixel outer border.
+
+## Immediate preferences and native CI follow-through (planned before edits)
+
+| Before | After | Reason |
+|---|---|---|
+| Preferences staged until Save | Connect changes directly to existing theme/settings/monitor owners; Close only | Preview theme immediately and persist each actual preference change |
+| Interval editing refreshes only after Save | Commit valid numeric edits with standard QSpinBox keyboardTracking=false; arrows apply immediately | Avoid partially typed values while keeping immediate committed changes |
+| Windows long-content panel exceeds viewport by 10 pixels | Override only the wrapped label minimum width, preserving preferred width and height-for-width | A hidden horizontal bar must not conceal clipped content |
+| Linux rendered disabled text gate fails | Reproduce on CI's Qt 6.8.3 and correct the demonstrated rendering/contract cause | Do not relax assertions or skip a platform |
+
+References: QSettings persistence, QComboBox::currentIndexChanged,
+QAbstractButton::toggled, QAbstractSpinBox::keyboardTracking, and QScrollArea's
+size-hint/layout guidance. Existing owners remain authoritative; no service
+start/stop or credentials change.
+
+- https://doc.qt.io/qt-6/qsettings.html
+- https://doc.qt.io/qt-6/qabstractspinbox.html#keyboardTracking-prop
+- https://doc.qt.io/qt-6/qscrollarea.html#size-hints-and-layouts
+
+Acceptance: real Settings changes are visible/persisted before dismissal; reopening
+retains them; Escape/Close never rolls back; merely opening changes nothing; theme,
+interval and Dock choices make no GitHub requests; optional management choice only
+refreshes on actual change. Native failures must be reproduced before their fix,
+and every original assertion remains active. Full native CI confirms the result.
+
+Linux Qt 6.8.3 reproduction: the disabled label uses LCD subpixel antialiasing
+with different per-channel coverage, not the single-alpha line assumed by the
+old assertion. The replacement reference is a real Qt QCheckBox with the same backing-store
+path, font/text/state/geometry and explicit expected theme color. A standalone
+QImage surrogate uses different font rasterization on Linux and was rejected.
+It compares rendered text without assuming a font rasterization algorithm. The
+magenta override remains a required rejected mutation.

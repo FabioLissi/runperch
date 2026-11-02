@@ -292,32 +292,42 @@ void Window::controlRunner(QString root,quint64 instance,ServiceAction action) {
 }
 void Window::settings() {
     QDialog dialog(this); dialog.setWindowTitle("Runperch settings"); auto* layout=new QVBoxLayout(&dialog);
-    auto* form=new QFormLayout; auto* seconds=new ThemedSpinBox; seconds->setRange(5,3600); seconds->setSuffix(" seconds"); seconds->setValue(savedRefreshInterval());
+    auto* form=new QFormLayout; auto* seconds=new ThemedSpinBox; seconds->setObjectName("refreshInterval"); seconds->setKeyboardTracking(false); seconds->setRange(5,3600); seconds->setSuffix(" seconds"); seconds->setValue(savedRefreshInterval());
     form->addRow("Refresh interval",seconds);
     auto* appearance=new ThemedComboBox; appearance->setObjectName("themePreference");
     appearance->addItems({"System","Light","Dark"}); appearance->setCurrentIndex(static_cast<int>(theme().preference()));
     form->addRow("Appearance",appearance); layout->addLayout(form);
     QCheckBox* hideDock=nullptr;
     if(presentation && presentation->supportsDockVisibility()) {
-        hideDock=new QCheckBox("Hide from Dock when the window is closed");
+        hideDock=new QCheckBox("Hide from Dock when the window is closed"); hideDock->setObjectName("hideDockWhenClosed");
         hideDock->setChecked(QSettings().value("hideDockWhenClosed",true).toBool());
         hideDock->setToolTip("Runperch stays in the menu bar. Open Runperch there to restore its window and Dock icon.");
         layout->addWidget(hideDock);
     }
     auto* management=new QCheckBox("Query GitHub runner-management status (optional; extra permissions)");
-    management->setChecked(QSettings().value("runnerManagementStatus",false).toBool()); layout->addWidget(management);
+    management->setObjectName("runnerManagementStatus"); management->setChecked(QSettings().value("runnerManagementStatus",false).toBool()); layout->addWidget(management);
     layout->addWidget(label("GitHub access uses GitHub CLI authorization. Use Connect GitHub in the main window for browser sign-in. No credentials are copied into Runperch."));
     layout->addWidget(label("Runperch is licensed under Apache 2.0. Qt is dynamically linked under its open-source licenses. See THIRD_PARTY_NOTICES.md for distribution requirements."));
-    auto* buttons=new QDialogButtonBox(QDialogButtonBox::Save|QDialogButtonBox::Cancel); layout->addWidget(buttons);
-    connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept); connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
-    if(dialog.exec()==QDialog::Accepted) {
-        theme().setPreference(static_cast<ThemePreference>(appearance->currentIndex()));
-        saveRefreshInterval(seconds->value()); monitor.setInterval(seconds->value());
-        if(hideDock) { QSettings().setValue("hideDockWhenClosed",hideDock->isChecked()); updateDockVisibility(); }
-        const bool accessChanged=QSettings().value("runnerManagementStatus",false).toBool()!=management->isChecked();
-        QSettings().setValue("runnerManagementStatus",management->isChecked());
-        if(accessChanged) { monitor.setRunnerStatusAccessEnabled(management->isChecked()); monitor.refresh(); }
-    }
+    connect(appearance,&QComboBox::currentIndexChanged,&dialog,[](int index) {
+        theme().setPreference(static_cast<ThemePreference>(index));
+    });
+    connect(&theme(),&ThemeController::changed,appearance,[appearance] {
+        const QSignalBlocker blocker(appearance);
+        appearance->setCurrentIndex(static_cast<int>(theme().preference()));
+    });
+    connect(seconds,&QSpinBox::valueChanged,&dialog,[this](int value) {
+        saveRefreshInterval(value); monitor.setInterval(value);
+    });
+    if(hideDock) connect(hideDock,&QCheckBox::toggled,&dialog,[this](bool checked) {
+        QSettings().setValue("hideDockWhenClosed",checked); updateDockVisibility();
+    });
+    connect(management,&QCheckBox::toggled,&dialog,[this](bool checked) {
+        QSettings().setValue("runnerManagementStatus",checked);
+        monitor.setRunnerStatusAccessEnabled(checked); monitor.refresh();
+    });
+    auto* buttons=new QDialogButtonBox(QDialogButtonBox::Close); layout->addWidget(buttons);
+    connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
+    dialog.exec();
 }
 void Window::authorization() {
     if(!auth) return;

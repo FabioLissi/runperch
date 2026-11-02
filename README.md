@@ -53,10 +53,11 @@ Click a thumbnail to see the full image.
   </tr>
 </table>
 
-Actual version 0.7.1 Qt interface, captured with scripted example data.
+Actual version 0.8.0 Qt interface, captured with scripted example data.
 [Overview](assets/screenshots/macos-dark-overview.png) and
 [appearance settings](assets/screenshots/macos-dark-settings.png) use the same
-shared tokens. Public screenshots contain no personal runner configuration or
+shared tokens. Preferences apply and persist immediately; switching appearance
+previews the theme without a Save button. Public screenshots contain no personal runner configuration or
 credentials.
 
 ## Status

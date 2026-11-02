@@ -201,3 +201,37 @@ Independent source/reference/visual review cleared this correction and reran
 focused tests on both offscreen and Cocoa backends (5 entries each, no skips).
 No live runner service, authentication or stored runner catalog was changed.
 The local app is still a development bundle requiring installed Qt.
+
+## 0.8.0 immediate preferences and completed local Linux reproduction
+
+- Public 0.7.1 run 41403721099 passed Mac/lint, failed one UI entry on each
+  other platform: Windows had 10 pixels of hidden horizontal overflow; Linux
+  rejected disabled text because its LCD rasterizer uses per-channel coverage.
+- Rebuilt the exact failing commit in an isolated Ubuntu 24.04 x86_64 container
+  with Qt 6.8.3 (matching CI). Its Linux disabled-text failure reproduced. Actual
+  evidence showed per-channel LCD edges; both the single-alpha approximation and
+  a standalone-QImage surrogate were rejected. The final reference is a real Qt
+  checkbox with independently specified expected color and identical widget
+  raster context. The actual wrong-magenta consumer remains a rejected mutation.
+- The new long-token layout case failed before its fix with 903/1279 pixels of
+  overflow at the two tested font metrics. Width-only minimumSizeHint override
+  retains natural label width and height-for-width while allowing text to wrap.
+  Ignored sizing was rejected because it collapsed labels beside stretches.
+- Immediate-preference regression failed before wiring the actual controls to
+  their existing owners. Theme, interval and Dock settings persist before Close;
+  reopening retains them. Closing never rolls back. Only an actual optional
+  management-choice change refreshes GitHub; no-op selections, opening Settings,
+  theme/interval/Dock changes do not query or control a runner.
+- Final local Mac: 7/7 CTest, 69 core and 23 UI entries, full Cocoa UI 23; no
+  failures/skips. Actual light/dark Settings/panel screenshots refreshed.
+- Final local Linux container: 5/5 CTest, 57 core and 23 UI entries; no failures
+  or skips, using CI's exact Qt version. This validates shared Linux behavior,
+  not native Linux service control (still unsupported) or a desktop display.
+- Workflow lint 1.7.12 and whitespace checks passed. Windows requires its native
+  CI result; the container/Mac passes do not certify Windows. No live runner,
+  credentials or account settings were changed by these isolated tests.
+
+Independent final source/reference review cleared 0.8.0 and reran seven focused
+entries covering persistence before dismissal/reopen, attached-runner management
+query counts and no-ops, long-token wrapping and the real-widget raster reference
+with its actual wrong-color mutation. All seven passed without skips.

@@ -105,6 +105,7 @@ ThemeController::ThemeController(QObject* parent):QObject(parent) {
     apply();
 }
 void ThemeController::setPreference(ThemePreference preference) {
+    if(choice==preference) return;
     choice=preference;
     QSettings().setValue("appearance",choice==ThemePreference::System ? "system" : choice==ThemePreference::Dark ? "dark" : "light");
 #if QT_VERSION >= QT_VERSION_CHECK(6,8,0)
