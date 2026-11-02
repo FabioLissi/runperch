@@ -148,8 +148,12 @@ successful query is not a health verdict: inspect the returned states.
   absence of an active job is insufficient idle evidence. No admin access is
   required merely to monitor the service, metrics or readable job activity.
 - No controls automatically run when the app launches, closes or refreshes.
-- Closing the window leaves its tray entry running where available. **Quit
-  Runperch** closes the monitor and leaves runners untouched.
+- On macOS, the red close button leaves Runperch in the menu bar and hides its
+  Dock icon. Choose **Open Runperch** in the menu-bar menu to restore both the
+  window and Dock icon. Disable **Hide from Dock when the window is closed** in
+  Settings if you prefer to keep the Dock icon.
+- Without an available tray, closing the window exits the monitor normally.
+  **Quit Runperch** always closes the monitor and leaves runners untouched.
 - CPU is process-tree core equivalents; RSS is a sum, including shared pages.
 - History contains only jobs observed by this app, not the complete GitHub audit.
 

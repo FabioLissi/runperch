@@ -2,6 +2,7 @@
 #include <QApplication>
 #include <QFile>
 #include <QLabel>
+#include <QMenu>
 #include <QSettings>
 #include <QTableWidget>
 #include <QTemporaryDir>
@@ -22,10 +23,50 @@ public:
     RemoteObservation value;
     void observe(const Registration&,RemoteCallback cb) override { cb(value); }
 };
+class TestPresentation final : public ApplicationPresentation {
+public:
+    bool available=true, succeeds=true, dockVisible=true;
+    QList<bool> requests;
+    bool statusAreaAvailable() const override { return available; }
+    bool supportsDockVisibility() const override { return true; }
+    bool setDockVisible(bool visible) override {
+        requests.append(visible); if(succeeds) dockVisible=visible; return succeeds;
+    }
+};
 }
 class UiTests : public QObject {
     Q_OBJECT
 private slots:
+    void init() { QSettings().clear(); qApp->setQuitOnLastWindowClosed(false); }
+    void closeKeepsMenuBarAndReopenRestoresDock() {
+        QSettings().setValue("hideDockWhenClosed",true);
+        TestPlatform platform; TestRemote remote; Monitor monitor(platform,remote); TestPresentation presence;
+        Window window(monitor,platform,nullptr,&presence); window.show();
+        auto* tray=window.findChild<QSystemTrayIcon*>(); QVERIFY(tray); tray->show();
+        window.close(); QVERIFY(!window.isVisible()); QVERIFY(tray->isVisible());
+        QVERIFY(!presence.requests.isEmpty()); QVERIFY(!presence.dockVisible);
+        bool opened=false;
+        for(auto* action : tray->contextMenu()->actions()) if(action->text()=="Open Runperch") { action->trigger(); opened=true; break; }
+        QVERIFY(opened); QVERIFY(window.isVisible()); QVERIFY(presence.dockVisible);
+    }
+    void noTrayDoesNotLeaveUnreachableBackgroundWindow() {
+        TestPlatform platform; TestRemote remote; Monitor monitor(platform,remote); TestPresentation presence;
+        presence.available=false;
+        Window window(monitor,platform,nullptr,&presence); window.show();
+        window.findChild<QSystemTrayIcon*>()->show();
+        QVERIFY(window.close()); QVERIFY(!presence.requests.contains(false));
+        QVERIFY(qApp->quitOnLastWindowClosed()); qApp->setQuitOnLastWindowClosed(false);
+    }
+    void dockPreferenceAndNativeFailureAreRespected() {
+        QSettings().setValue("hideDockWhenClosed",false);
+        TestPlatform platform; TestRemote remote; Monitor monitor(platform,remote); TestPresentation presence;
+        Window window(monitor,platform,nullptr,&presence); window.show(); window.findChild<QSystemTrayIcon*>()->show();
+        window.close(); QVERIFY(!presence.requests.contains(false));
+        QSettings().setValue("hideDockWhenClosed",true); presence.succeeds=false;
+        window.show(); window.close(); QVERIFY(presence.requests.contains(false)); QVERIFY(presence.dockVisible);
+        const auto count=presence.requests.count(false);
+        window.show(); window.close(); QCOMPARE(presence.requests.count(false),count+1);
+    }
     void applicationIconRemainsVisibleAgainstDarkDock() {
         TestPlatform platform; TestRemote remote; Monitor monitor(platform,remote);
         Window window(monitor,platform);

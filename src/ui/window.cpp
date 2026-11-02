@@ -13,6 +13,7 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHeaderView>
+#include <QHideEvent>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -23,6 +24,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSignalBlocker>
+#include <QShowEvent>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTableWidget>
@@ -47,7 +49,7 @@ QColor stateColor(const QString& state) {
     return QColor("#66716b");
 }
 }
-Window::Window(Monitor& m, Platform& p, GitHubAuth* a, QWidget* parent) : QMainWindow(parent),monitor(m),platform(p),auth(a) {
+Window::Window(Monitor& m, Platform& p, GitHubAuth* a, ApplicationPresentation* presence, QWidget* parent) : QMainWindow(parent),monitor(m),platform(p),auth(a),presentation(presence) {
     setWindowTitle("Runperch"); resize(1120,780); setMinimumSize(760,600);
     setWindowIcon(QIcon(":/assets/app-icon.png"));
     auto* central=new QWidget; setCentralWidget(central);
@@ -127,7 +129,7 @@ Window::Window(Monitor& m, Platform& p, GitHubAuth* a, QWidget* parent) : QMainW
     )");
     menu=new QMenu(this); tray=new QSystemTrayIcon(this);
     QIcon trayIcon(":/assets/logo.png"); trayIcon.setIsMask(true); tray->setIcon(trayIcon); tray->setContextMenu(menu);
-    if(QSystemTrayIcon::isSystemTrayAvailable()) tray->show();
+    if(statusAreaAvailable()) tray->show();
     connect(tray,&QSystemTrayIcon::activated,this,[this](QSystemTrayIcon::ActivationReason reason) {
         if(reason==QSystemTrayIcon::DoubleClick || reason==QSystemTrayIcon::Trigger) { show(); raise(); activateWindow(); }
     });
@@ -270,6 +272,13 @@ void Window::settings() {
     QDialog dialog(this); dialog.setWindowTitle("Runperch settings"); auto* layout=new QVBoxLayout(&dialog);
     auto* form=new QFormLayout; auto* seconds=new QSpinBox; seconds->setRange(5,3600); seconds->setSuffix(" seconds"); seconds->setValue(savedRefreshInterval());
     form->addRow("Refresh interval",seconds); layout->addLayout(form);
+    QCheckBox* hideDock=nullptr;
+    if(presentation && presentation->supportsDockVisibility()) {
+        hideDock=new QCheckBox("Hide from Dock when the window is closed");
+        hideDock->setChecked(QSettings().value("hideDockWhenClosed",true).toBool());
+        hideDock->setToolTip("Runperch stays in the menu bar. Open Runperch there to restore its window and Dock icon.");
+        layout->addWidget(hideDock);
+    }
     auto* management=new QCheckBox("Query GitHub runner-management status (optional; extra permissions)");
     management->setChecked(QSettings().value("runnerManagementStatus",false).toBool()); layout->addWidget(management);
     layout->addWidget(label("GitHub access uses GitHub CLI authorization. Use Connect GitHub in the main window for browser sign-in. No credentials are copied into Runperch."));
@@ -278,6 +287,7 @@ void Window::settings() {
     connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept); connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
     if(dialog.exec()==QDialog::Accepted) {
         saveRefreshInterval(seconds->value()); monitor.setInterval(seconds->value());
+        if(hideDock) { QSettings().setValue("hideDockWhenClosed",hideDock->isChecked()); updateDockVisibility(); }
         QSettings().setValue("runnerManagementStatus",management->isChecked());
         monitor.setRunnerStatusAccessEnabled(management->isChecked()); monitor.refresh();
     }
@@ -321,6 +331,24 @@ void Window::history() {
     layout->addWidget(jobs); dialog.exec();
 }
 void Window::closeEvent(QCloseEvent* event) {
-    if(tray->isVisible()) { hide(); event->ignore(); } else QMainWindow::closeEvent(event);
+    if(tray->isVisible() && statusAreaAvailable()) { hide(); event->ignore(); }
+    else { updateDockVisibility(); qApp->setQuitOnLastWindowClosed(true); QMainWindow::closeEvent(event); }
+}
+bool Window::statusAreaAvailable() const {
+    return presentation ? presentation->statusAreaAvailable() : QSystemTrayIcon::isSystemTrayAvailable();
+}
+void Window::updateDockVisibility() {
+    if(!presentation || !presentation->supportsDockVisibility()) return;
+    const bool visible=isVisible() || !QSettings().value("hideDockWhenClosed",true).toBool()
+        || !tray || !tray->isVisible() || !statusAreaAvailable();
+    if(visible==dockVisible) return;
+    if(presentation->setDockVisible(visible)) dockVisible=visible;
+    else statusBar()->showMessage("macOS could not change Runperch's Dock visibility.",5000);
+}
+void Window::showEvent(QShowEvent* event) {
+    QMainWindow::showEvent(event); updateDockVisibility();
+}
+void Window::hideEvent(QHideEvent* event) {
+    QMainWindow::hideEvent(event); updateDockVisibility();
 }
 }

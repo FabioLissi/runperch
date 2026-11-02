@@ -37,7 +37,8 @@ int main(int argc,char** argv) {
     QStringList paths=savedRunnerDirectories(); paths.append(parser.values("runner")); paths.removeDuplicates();
     QStringList invalid;
     for(const auto& path : paths) { QString error; if(!monitor.add(path,&error)) invalid << error; }
-    Window window(monitor,*platform,&auth); window.show();
+    auto presentation=createApplicationPresentation();
+    Window window(monitor,*platform,&auth,presentation.get()); window.show();
     if(!parser.isSet("screenshot")) auth.check();
     if(!invalid.isEmpty()) QTimer::singleShot(0,&window,[&] { QMessageBox::warning(&window,"Runner configuration",invalid.join('\n')); });
     if(parser.isSet("screenshot")) {
