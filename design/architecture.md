@@ -3,6 +3,7 @@
 The 0.2 GitHub connection, recent-activity and icon additions have their complete
 reference conformance table in [authorization.md](authorization.md). Version 0.4
 local controls are specified in [local-service-controls.md](local-service-controls.md).
+Version 0.5 local metrics are specified in [local-stats.md](local-stats.md).
 
 ## Before / after / reason
 
@@ -11,7 +12,7 @@ local controls are specified in [local-service-controls.md](local-service-contro
 | Runner health lives in terminals and GitHub | Tray, window and JSON CLI share one monitor | Make existing runners observable |
 | Process existence can be confused with availability | Service, connection and job state remain separate | Report only evidence we possess |
 | Each platform needs different service commands | One Platform interface; launchd is the first adapter | Keep shared policy portable |
-| A pause can silently terminate work | Explicit start/stop; busy/unknown stop is disabled | Avoid promising unsupported drain behavior |
+| A pause can silently terminate work | Explicit start/stop; busy/unknown stop needs an immediate-stop confirmation | Avoid promising unsupported drain behavior |
 | Brand exists only in mockups | Original Runperch mark and a working desktop UI | Deliver a recognizable independent utility |
 
 ## Production practices and conformance

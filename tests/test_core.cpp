@@ -6,6 +6,7 @@
 #include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
+#include <QProcess>
 #include <QJsonDocument>
 #include <QSettings>
 #include <QSignalSpy>
@@ -16,6 +17,7 @@
 #include <filesystem>
 #ifdef RUNPERCH_MACOS_TESTS
 #include "platform/macos/launchd_parser.h"
+#include "platform/macos/process_snapshot.h"
 #endif
 
 using namespace runperch;
@@ -76,6 +78,46 @@ class CoreTests : public QObject {
     Q_OBJECT
 private slots:
 #ifdef RUNPERCH_MACOS_TESTS
+    void processSnapshotScopesTreeAndWorkerPath() {
+        QTemporaryDir dir; writeFile(dir.filePath("Runner.Worker"),"fixture"); writeFile(dir.filePath("other-worker"),"fixture");
+        const auto worker=dir.filePath("Runner.Worker");
+        const auto data=QString("10 1 50.0 100 02-06:15:30 /bin/bash\n12 11 25.0 200 01:02 %1\n11 10 0.0 10 00:03 /bin/node\n13 10 0.0 10 00:01 %2\n90 1 999.0 999 00:10 %1\n").arg(worker,dir.filePath("other-worker")).toUtf8();
+        const auto got=parseProcessSnapshot(data,10,worker);
+        QVERIFY(got.cpuCores); QCOMPARE(*got.cpuCores,0.75); QVERIFY(got.rssBytes); QCOMPARE(*got.rssBytes,qint64(320*1024));
+        QVERIFY(got.uptimeSeconds); QCOMPARE(*got.uptimeSeconds,qint64(195330)); QVERIFY(got.activeWorkers); QCOMPARE(*got.activeWorkers,1);
+        const auto unavailable=parseProcessSnapshot(data,10,dir.filePath("missing")); QVERIFY(!unavailable.activeWorkers); QVERIFY(unavailable.cpuCores);
+        const auto missingRoot=parseProcessSnapshot(data,99,worker); QVERIFY(!missingRoot.activeWorkers); QVERIFY(!missingRoot.uptimeSeconds);
+    }
+    void invalidProcessSnapshot_data() {
+        QTest::addColumn<QByteArray>("rows");
+        QTest::newRow("bad-time")<<QByteArray("10 1 0.0 1 00:99 /bin/bash\n");
+        QTest::newRow("day-without-hour")<<QByteArray("10 1 0.0 1 1-02:03 /bin/bash\n");
+        QTest::newRow("time-overflow")<<QByteArray("10 1 0.0 1 999999999999999999-01:02:03 /bin/bash\n");
+        QTest::newRow("rss-overflow")<<QByteArray("10 1 0.0 9223372036854775807 00:00 /bin/bash\n");
+        QTest::newRow("duplicate-pid")<<QByteArray("10 1 0.0 1 00:00 /bin/bash\n10 1 0.0 1 00:00 /bin/bash\n");
+        QTest::newRow("invalid-row")<<QByteArray("10 1 0.0 1 00:00 /bin/bash\ntruncated\n");
+        QTest::newRow("cycle")<<QByteArray("10 11 0.0 1 00:00 /bin/bash\n11 10 0.0 1 00:00 /bin/node\n");
+        QTest::newRow("negative-cpu")<<QByteArray("10 1 -1.0 1 00:00 /bin/bash\n");
+    }
+    void invalidProcessSnapshot() {
+        QFETCH(QByteArray,rows); const auto got=parseProcessSnapshot(rows,10,QCoreApplication::applicationFilePath());
+        QVERIFY(!got.cpuCores); QVERIFY(!got.rssBytes); QVERIFY(!got.activeWorkers); QVERIFY(!got.uptimeSeconds);
+    }
+    void realProcessProducerFeedsSnapshotReader() {
+        QProcess child; child.start(QCoreApplication::applicationFilePath(),{"--process-fixture=wait"}); QVERIFY(child.waitForStarted(5000));
+        ProcessExecutor executor; bool complete=false; ProcessStats got;
+        readProcessSnapshot(executor,QCoreApplication::applicationPid(),QCoreApplication::applicationFilePath(),[&](ProcessStats stats) { got=stats; complete=true; });
+        QTRY_VERIFY(complete); child.kill(); QVERIFY(child.waitForFinished(5000));
+        QVERIFY(got.cpuCores); QVERIFY(got.rssBytes); QVERIFY(*got.rssBytes>0); QVERIFY(got.uptimeSeconds);
+        QVERIFY(got.activeWorkers); QCOMPARE(*got.activeWorkers,1);
+    }
+    void failedProcessProducerLeavesStatsUnavailable() {
+        FakeExecutor executor; executor.results={CommandResult{}};
+        bool called=false;
+        readProcessSnapshot(executor,10,QCoreApplication::applicationFilePath(),[&](ProcessStats got) { called=true; QVERIFY(!got.cpuCores); QVERIFY(!got.activeWorkers); });
+        QVERIFY(called); QCOMPARE(executor.calls.size(),1); QVERIFY(executor.calls[0].contains("LC_ALL=C"));
+        QVERIFY(!executor.calls[0].join(' ').contains("args="));
+    }
     void loadedServiceRequiresIdentity() {
         // Field layout captured from a real user LaunchAgent via launchctl print.
         QByteArray output="gui/501/actions.runner.test = {\n\tpath = /agents/test.plist\n\tstate = running\n\tprogram = /runner/runsvc.sh\n\tworking directory = /runner\n\tpid = 123\n}\n";
@@ -134,6 +176,21 @@ private slots:
     void localServiceDoesNotImplyOnlineOrIdle() {
         auto r=ready(); r.remote={}; QCOMPARE(status(r),"Service running");
         QVERIFY(!canControl(r,ServiceAction::Stop,QDateTime::currentDateTimeUtc()).allowed);
+    }
+    void localWorkerActivityIsFreshEvidenceNotIdleProof() {
+        auto r=ready(); r.remote={}; r.service.activeWorkers=1;
+        QCOMPARE(localWorkState(r.service),LocalWorkState::Active); QCOMPARE(status(r),"Running");
+        r.service.activeWorkers=0; QCOMPARE(localWorkState(r.service),LocalWorkState::NoneObserved); QCOMPARE(status(r),"Service running");
+        r.service.observedAt=r.service.observedAt.addSecs(-31); QCOMPARE(localWorkState(r.service),LocalWorkState::Unknown);
+        QVERIFY(!canControl(r,ServiceAction::Stop,QDateTime::currentDateTimeUtc()).allowed);
+    }
+    void localWorkerOverridesRemoteIdleForConservativeStop() {
+        auto r=ready(); r.service.activeWorkers=1;
+        const auto now=QDateTime::currentDateTimeUtc();
+        QCOMPARE(status(r),"Running");
+        QVERIFY(!canControl(r,ServiceAction::Stop,now).allowed);
+        QVERIFY(canControl(r,ServiceAction::Stop,now,StopAuthorization::ConfirmedImmediate).allowed);
+        r.service.activeWorkers=0; QVERIFY(canControl(r,ServiceAction::Stop,now).allowed);
     }
     void stopPolicy_data() {
         QTest::addColumn<int>("variant"); QTest::addColumn<bool>("allowed");

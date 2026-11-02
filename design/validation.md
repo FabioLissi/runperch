@@ -77,3 +77,34 @@ Windows bytes under Q_OS_WIN and retains the LF comparison elsewhere; no
 production output is normalized or changed. Independent review confirmed the
 receipt and ran the focused Mac regression (3 entries passed). Native Windows
 confirmation remains pending the next CI run.
+
+## 0.5.0 local service statistics
+
+- macOS Release build: all 7 CTest gates passed. Core reports 67 passed;
+  UI reports 9 passed; neither suite skipped or failed. Native Cocoa presence,
+  bundle icon, CLI and application capture/failure gates also passed.
+- A real ps producer/consumer contract launches an owned temporary child,
+  reads its process tree and verifies exact executable-path worker matching.
+  It does not start or stop a real GitHub runner.
+- Parser coverage includes malformed/truncated snapshots, duplicate PID,
+  rooted cycles, invalid elapsed time, overflow, missing root and unrelated
+  workers. Missing data stays unavailable.
+- The UI regression failed before adding the local activity display. Independent
+  review then identified a conflicting GitHub Idle/local-worker Stop admission.
+  Its regression failed before the shared guard and passes afterward, including
+  the explicit immediate-stop exception and zero-worker/remote-Idle case.
+- Independent source review and focused parser, actual ps, Window and control
+  tests passed after that correction. Review checked units, privacy, platform
+  boundaries and that no observed worker never becomes proof of Idle.
+- Live read-only local-only inspection reported a running service, roughly
+  2 days 6 hours uptime, 153 MiB aggregate RSS and zero observed workers.
+  No GitHub request or monitored-service mutation was performed.
+- Previous 0.4.0 source passed all three public platform jobs and workflow lint
+  in run 41389246461. Those results do not validate 0.5.0.
+
+The new native statistics adapter is macOS-only; Windows/Linux still have the
+explicit unsupported native-service adapter. No real job was launched solely
+for this validation. Local worker presence is process evidence, not a GitHub
+connectivity check or a source of workflow names/results. CPU is a decaying
+average, RSS can double-count shared pages, and service uptime is not job age.
+The development bundle still depends on local Qt and optional gh installations.

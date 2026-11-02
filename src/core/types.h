@@ -10,6 +10,7 @@ enum class ConnectionState { Unknown, Online, Offline };
 enum class JobState { Unknown, Idle, Running };
 enum class ServiceAction { Start, Stop };
 enum class StopAuthorization { IdleOnly, ConfirmedImmediate };
+enum class LocalWorkState { Unknown, NoneObserved, Active };
 
 struct Registration {
     QString root;
@@ -30,6 +31,8 @@ struct ServiceObservation {
     std::optional<double> cpuCores;
     std::optional<qint64> rssBytes;
     std::optional<qint64> freeDiskBytes;
+    std::optional<qint64> uptimeSeconds;
+    std::optional<int> activeWorkers;
 };
 struct RemoteObservation {
     ConnectionState connection = ConnectionState::Unknown;
@@ -69,6 +72,8 @@ bool isFresh(QDateTime observedAt, QDateTime now = QDateTime::currentDateTimeUtc
 QString text(ServiceState state);
 QString text(ConnectionState state);
 QString text(JobState state);
+QString text(LocalWorkState state);
+LocalWorkState localWorkState(const ServiceObservation&, QDateTime now = QDateTime::currentDateTimeUtc());
 QString status(const Runner& runner);
 ControlDecision canControl(const Runner& runner, ServiceAction action,
                            QDateTime now, StopAuthorization = StopAuthorization::IdleOnly,

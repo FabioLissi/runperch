@@ -38,10 +38,14 @@ QLabel* label(const QString& value, const QString& name={}) {
     auto* l=new QLabel(value); l->setWordWrap(true); l->setTextFormat(Qt::PlainText);
     l->setObjectName(name); l->setTextInteractionFlags(Qt::TextSelectableByMouse); return l;
 }
-QString elapsed(QDateTime start) {
-    if(!start.isValid()) return "—";
-    auto seconds=qMax<qint64>(0,start.secsTo(QDateTime::currentDateTimeUtc()));
+QString duration(qint64 seconds) {
+    if(seconds<0) return "—";
+    if(seconds>=86400) return QString("%1d %2h %3m").arg(seconds/86400).arg(seconds/3600%24).arg(seconds/60%60);
+    if(seconds>=3600) return QString("%1h %2m").arg(seconds/3600).arg(seconds/60%60);
     return seconds<60 ? QString("%1s").arg(seconds) : QString("%1m %2s").arg(seconds/60).arg(seconds%60);
+}
+QString elapsed(QDateTime start) {
+    return start.isValid() ? duration(qMax<qint64>(0,start.secsTo(QDateTime::currentDateTimeUtc()))) : "—";
 }
 QColor stateColor(const QString& state) {
     if(state=="Running") return QColor("#a65d06");
@@ -183,9 +187,13 @@ void Window::rebuild() {
         const auto& r=monitor.runners()[i]; const auto state=status(r);
         running += state=="Running"; idle += state=="Idle"; stopped += state=="Stopped"; unknown += state=="Unknown" || state=="Offline";
         local += state=="Service running";
-        const QString job=!r.remote.jobName.isEmpty() ? r.remote.jobName : !r.remote.lastJobName.isEmpty()
-            ? "Latest: " + r.remote.lastJobName + " · " + r.remote.lastConclusion : "Job visibility unavailable";
-        QStringList values{r.registration.name,state,job,elapsed(r.remote.startedAt)};
+        const bool remoteActive=isFresh(r.remote.observedAt) && r.remote.job==JobState::Running;
+        const auto localWork=localWorkState(r.service);
+        const QString job=remoteActive && !r.remote.jobName.isEmpty() ? r.remote.jobName
+            : localWork==LocalWorkState::Active ? text(localWork) : !r.remote.lastJobName.isEmpty()
+            ? "Latest: " + r.remote.lastJobName + " · " + r.remote.lastConclusion
+            : localWork==LocalWorkState::NoneObserved ? text(localWork) : "Job visibility unavailable";
+        QStringList values{r.registration.name,state,job,remoteActive ? elapsed(r.remote.startedAt) : "—"};
         for(int c=0;c<values.size();++c) {
             auto* item=new QTableWidgetItem(values[c]); item->setToolTip(values[c]);
             if(c==1) item->setForeground(stateColor(state)); table->setItem(i,c,item);
@@ -205,22 +213,29 @@ void Window::details() {
         startButton->setEnabled(false); stopButton->setEnabled(false); githubButton->setEnabled(false); return;
     }
     const auto& r=monitor.runners()[i];
-    title->setText(r.remote.jobName.isEmpty() ? r.registration.name : r.remote.jobName);
-    identity->setText(r.registration.githubUrl + (r.remote.workflowName.isEmpty() ? "" : " · " + r.remote.workflowName));
+    const bool remoteActive=isFresh(r.remote.observedAt) && r.remote.job==JobState::Running;
+    const auto localWork=localWorkState(r.service);
+    title->setText(remoteActive && !r.remote.jobName.isEmpty() ? r.remote.jobName : r.registration.name);
+    identity->setText(r.registration.githubUrl + (!remoteActive || r.remote.workflowName.isEmpty() ? "" : " · " + r.remote.workflowName));
     const auto localState=isFresh(r.service.observedAt) ? r.service.state : ServiceState::Unknown;
     const auto pid=localState==ServiceState::Running && r.service.pid>0 ? QString(" (PID %1)").arg(r.service.pid) : QString();
-    states->setText("Service: " + text(localState) + pid
+    states->setText("Service: " + text(localState) + pid + "     " + text(localWork)
        + "     Runner availability: " + text(isFresh(r.remote.observedAt) ? r.remote.connection : ConnectionState::Unknown)
        + "     Job: " + text(isFresh(r.remote.observedAt) ? r.remote.job : JobState::Unknown));
-    activity->setText(!r.remote.stepName.isEmpty() ? r.remote.stepName : !r.remote.jobName.isEmpty() ? r.remote.jobName
+    activity->setText(remoteActive && !r.remote.stepName.isEmpty() ? r.remote.stepName : remoteActive && !r.remote.jobName.isEmpty() ? r.remote.jobName
+        : localWork==LocalWorkState::Active ? text(localWork)
         : !r.remote.lastJobName.isEmpty() ? "Last job: " + r.remote.lastJobName + " · " + r.remote.lastConclusion
+        : localWork==LocalWorkState::NoneObserved ? text(localWork)
         : r.remote.jobsReadable ? "No job matched in the recent GitHub results"
         : r.remote.workflowsReadable ? "Workflow list available; no job details observed" : "GitHub job observations unavailable");
     QString cpu=r.service.cpuCores ? QString::number(*r.service.cpuCores,'f',2) + " cores" : "—";
     QString memory=r.service.rssBytes ? QString::number(*r.service.rssBytes/1073741824.0,'f',2) + " GB" : "—";
     QString disk=r.service.freeDiskBytes ? QString::number(*r.service.freeDiskBytes/1073741824.0,'f',0) + " GB" : "—";
-    resources->setText("CPU: " + cpu + "      RSS: " + memory + "      Free disk: " + disk + "      Elapsed: " + elapsed(r.remote.startedAt));
-    resources->setToolTip("CPU is the process tree's aggregate core usage; RSS sums resident memory and can count shared pages more than once. Free disk is the runner installation volume.");
+    const QString uptime=isFresh(r.service.observedAt) && r.service.uptimeSeconds ? duration(*r.service.uptimeSeconds) : "—";
+    const QString workers=localWork!=LocalWorkState::Unknown ? QString::number(*r.service.activeWorkers) : "—";
+    resources->setText("CPU avg: " + cpu + "      RSS: " + memory + "      Free disk: " + disk
+        + "\nService uptime: " + uptime + "      Workers: " + workers + "      Job elapsed: " + (remoteActive ? elapsed(r.remote.startedAt) : "—"));
+    resources->setToolTip("CPU is a recent process average summed across the service tree; RSS can count shared pages more than once. Uptime is the service process age. Workers are exact executable-path matches in this service tree. No worker observed does not prove GitHub connectivity or idle.");
     explanation->setText(r.service.detail + "\n" + (r.remote.jobsReadable ? "Job history readable. " : "")
         + r.remote.permissionDetail + (r.remote.lastCompletedAt.isValid() ? "\nLatest completion: " + r.remote.lastCompletedAt.toLocalTime().toString("yyyy-MM-dd HH:mm:ss") : ""));
     auto stamp=[](QDateTime t) { return t.isValid() ? t.toLocalTime().toString("HH:mm:ss") + (isFresh(t) ? "" : " (stale)") : "not observed"; };

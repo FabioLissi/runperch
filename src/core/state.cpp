@@ -17,10 +17,20 @@ QString text(JobState s) {
     switch(s) { case JobState::Running: return "Running";
     case JobState::Idle: return "Idle"; default: return "Unknown"; }
 }
+QString text(LocalWorkState s) {
+    switch(s) { case LocalWorkState::Active: return "Local worker active";
+    case LocalWorkState::NoneObserved: return "No active worker observed";
+    default: return "Worker activity unavailable"; }
+}
+LocalWorkState localWorkState(const ServiceObservation& s,QDateTime now) {
+    if(!isFresh(s.observedAt,now) || s.state!=ServiceState::Running || !s.activeWorkers || *s.activeWorkers<0) return LocalWorkState::Unknown;
+    return *s.activeWorkers>0 ? LocalWorkState::Active : LocalWorkState::NoneObserved;
+}
 QString status(const Runner& r) {
     auto now=QDateTime::currentDateTimeUtc();
     auto fresh=[now](QDateTime time) { return isFresh(time,now); };
     if(fresh(r.service.observedAt) && r.service.state == ServiceState::Stopped) return "Stopped";
+    if(localWorkState(r.service,now)==LocalWorkState::Active) return "Running";
     if(fresh(r.remote.observedAt) && r.remote.job == JobState::Running) return "Running";
     if(fresh(r.remote.observedAt) && r.remote.connection == ConnectionState::Offline) return "Offline";
     if(fresh(r.service.observedAt) && fresh(r.remote.observedAt)
@@ -45,6 +55,8 @@ ControlDecision canControl(const Runner& r, ServiceAction a, QDateTime now, Stop
     if(r.service.state != ServiceState::Running) return {false, "Service must be confirmed running."};
     if(authorization==StopAuthorization::ConfirmedImmediate)
         return {true,"Stop this local service now. This can interrupt a job and requires confirmation."};
+    if(r.service.activeWorkers && *r.service.activeWorkers>0)
+        return {false,"A local worker is active. Only an explicitly confirmed immediate stop may interrupt it."};
     if(!fresh(r.remote.observedAt)) return {false, "Refresh GitHub status first."};
     if(r.remote.connection != ConnectionState::Online || r.remote.job != JobState::Idle)
         return {false, "Stop is available only when GitHub confirms this runner is idle."};
@@ -57,6 +69,9 @@ QJsonObject toJson(const Runner& r) {
     if(r.service.cpuCores) service["cpu_cores"] = *r.service.cpuCores;
     if(r.service.rssBytes) service["aggregate_rss_bytes"] = *r.service.rssBytes;
     if(r.service.freeDiskBytes) service["free_disk_bytes"] = *r.service.freeDiskBytes;
+    if(r.service.uptimeSeconds && *r.service.uptimeSeconds>=0) service["uptime_seconds"]=*r.service.uptimeSeconds;
+    if(r.service.activeWorkers && *r.service.activeWorkers>=0) service["active_workers"]=*r.service.activeWorkers;
+    service["local_worker_activity"]=text(localWorkState(r.service));
     return {{"name", r.registration.name}, {"root", r.registration.root},
         {"github_url", r.registration.githubUrl}, {"status", status(r)},
         {"service", service}, {"refreshing", r.refreshing},

@@ -1,6 +1,7 @@
 #include "platform/platform.h"
 #include "core/command.h"
 #include "platform/macos/launchd_parser.h"
+#include "platform/macos/process_snapshot.h"
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -9,7 +10,6 @@
 #include <QStandardPaths>
 #include <QStorageInfo>
 #include <QSysInfo>
-#include <QSet>
 #include <unistd.h>
 
 namespace runperch {
@@ -85,33 +85,12 @@ public:
                 auto parsed=parseLaunchdStatus(result.output,id->path,r.root);
                 parsed.freeDiskBytes=base.freeDiskBytes; base=parsed;
                 if(base.state!=ServiceState::Running) { cb(base); return; }
-                executor.run("/bin/ps", {"-axo", "pid=,ppid=,pcpu=,rss="},
-                    [base, cb](CommandResult process) mutable {
-                        if(process.ok) {
-                            struct Row { qint64 pid; qint64 parent; double cpu; qint64 rss; };
-                            QList<Row> rows;
-                            const auto lines = QString::fromUtf8(process.output).split('\n');
-                            const QRegularExpression row("^\\s*(\\d+)\\s+(\\d+)\\s+([0-9.]+)\\s+(\\d+)\\s*$");
-                            for(const auto& line : lines) {
-                                const auto m = row.match(line);
-                                if(m.hasMatch()) rows << Row{m.captured(1).toLongLong(),m.captured(2).toLongLong(),
-                                    m.captured(3).toDouble(),m.captured(4).toLongLong()};
-                            }
-                            QSet<qint64> members{base.pid};
-                            bool changed = true;
-                            while(changed) { changed = false;
-                                for(const auto& item : rows) if(members.contains(item.parent) && !members.contains(item.pid)) {
-                                    members.insert(item.pid); changed = true;
-                                }
-                            }
-                            double cpu = 0; qint64 rss = 0; bool rootFound = false;
-                            for(const auto& item : rows) if(members.contains(item.pid)) {
-                                rootFound |= item.pid == base.pid; cpu += item.cpu / 100.0; rss += item.rss * 1024;
-                            }
-                            if(rootFound) { base.cpuCores = cpu; base.rssBytes = rss; }
-                        }
-                        cb(base);
-                    });
+                const auto worker=QDir(r.root).filePath("bin/Runner.Worker");
+                readProcessSnapshot(executor,base.pid,worker,[base,cb](ProcessStats stats) mutable {
+                    base.cpuCores=stats.cpuCores; base.rssBytes=stats.rssBytes;
+                    base.uptimeSeconds=stats.uptimeSeconds; base.activeWorkers=stats.activeWorkers;
+                    cb(base);
+                });
               });
         });
     }

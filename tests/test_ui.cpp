@@ -46,6 +46,20 @@ class UiTests : public QObject {
     Q_OBJECT
 private slots:
     void init() { QSettings().clear(); qApp->setQuitOnLastWindowClosed(false); }
+    void localStatsAndWorkerActivityNeedNoGitHub() {
+        QTemporaryDir runner; QFile file(runner.filePath(".runner")); QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("{\"agentId\":42,\"agentName\":\"local-stats\",\"gitHubUrl\":\"https://github.com/example/project\"}"); file.close();
+        TestPlatform platform; TestRemote remote; platform.value.state=ServiceState::Running;
+        platform.value.observedAt=QDateTime::currentDateTimeUtc(); platform.value.uptimeSeconds=195330;
+        platform.value.activeWorkers=1; platform.value.cpuCores=0.75; platform.value.rssBytes=1048576;
+        Monitor monitor(platform,remote); QVERIFY(monitor.add(runner.path())); Window window(monitor,platform); monitor.refresh(true);
+        auto* states=window.findChild<QLabel*>("runnerStates"); QVERIFY(states->text().contains("Local worker active"));
+        auto* metrics=window.findChild<QLabel*>("metrics"); QVERIFY(metrics->text().contains("Service uptime: 2d 6h"));
+        auto* table=window.findChild<QTableWidget*>("runnerTable"); QCOMPARE(table->item(0,1)->text(),"Running");
+        platform.value.activeWorkers=0; monitor.refresh(true);
+        QVERIFY(states->text().contains("No active worker observed")); QCOMPARE(table->item(0,1)->text(),"Service running");
+        QCOMPARE(remote.calls,0);
+    }
     void localStopRequiresConfirmationAndStartWorksWithoutGitHub() {
         QTemporaryDir runner;
         QFile file(runner.filePath(".runner")); QVERIFY(file.open(QIODevice::WriteOnly));

@@ -19,7 +19,8 @@ and open the current job without hunting through terminals.
 
 - **Runner overview:** one row per installation, details for the selected runner.
 - **Current work:** workflow, job, reported step, elapsed time and GitHub link.
-- **Resource observations:** process-tree CPU, aggregate RSS and free disk.
+- **Local observations:** process-tree CPU average, aggregate RSS, free disk,
+  service uptime and worker activity, without GitHub sign-in or admin access.
 - **Menu bar / tray:** see runner states and open the main window quickly.
 - **Local history:** a bounded list of jobs observed while Runperch runs.
 - **Connect GitHub:** browser/device sign-in through GitHub CLI, with account identity and no token copying.
@@ -157,7 +158,12 @@ successful query is not a health verdict: inspect the returned states.
   Settings if you prefer to keep the Dock icon.
 - Without an available tray, closing the window exits the monitor normally.
   **Quit Runperch** always closes the monitor and leaves runners untouched.
-- CPU is process-tree core equivalents; RSS is a sum, including shared pages.
+- CPU is a recent process-tree average in core equivalents; RSS is a sum,
+  including shared pages. Service uptime is the local service process age.
+- A matching local worker reports active work. No active worker observed does
+  not prove GitHub connectivity or idle; job names and steps use optional
+  read-only GitHub observations. A locally observed worker blocks conservative
+  stop even if GitHub still reports Idle.
 - History contains only jobs observed by this app, not the complete GitHub audit.
 
 Settings and observed-job history use Qt's per-user application settings. Raw
