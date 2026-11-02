@@ -10,6 +10,18 @@ concurrency:
   group: runperch-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  workflow-lint:
+    name: Workflow lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install pinned actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - name: Validate workflows
+        run: '"$(go env GOPATH)/bin/actionlint"'
   native:
     name: ${{ matrix.os }} / shared app and contracts
     strategy:
