@@ -47,14 +47,18 @@ void Monitor::refresh(bool localOnly) {
     }
 }
 void Monitor::remember(const Runner& r) {
-    if(r.remote.jobId <= 0) return;
+    const bool active=r.remote.jobId>0;
+    const auto id=active ? r.remote.jobId : r.remote.lastJobId;
+    if(id<=0) return;
     QSettings settings;
     auto records = QJsonDocument::fromJson(settings.value("history").toByteArray()).array();
-    const QString key = r.registration.githubUrl + "/" + QString::number(r.remote.jobId);
-    QJsonObject entry{{"key",key},{"runner",r.registration.name},{"job",r.remote.jobName},
-        {"workflow",r.remote.workflowName},{"url",r.remote.jobUrl},
+    const QString key = r.registration.githubUrl + "/" + QString::number(id);
+    QJsonObject entry{{"key",key},{"runner",r.registration.name},{"job",active ? r.remote.jobName : r.remote.lastJobName},
+        {"workflow",r.remote.workflowName},{"url",active ? r.remote.jobUrl : r.remote.lastJobUrl},
+        {"result",active ? "Running when observed" : r.remote.lastConclusion},
         {"last_seen",QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
-        {"started_at",r.remote.startedAt.toString(Qt::ISODate)}};
+        {"started_at",r.remote.startedAt.toString(Qt::ISODate)},
+        {"completed_at",active ? QString() : r.remote.lastCompletedAt.toString(Qt::ISODate)}};
     for(int i=0;i<records.size();++i) if(records[i].toObject().value("key").toString() == key) { records.removeAt(i); break; }
     records.prepend(entry);
     while(records.size() > 200) records.removeLast();

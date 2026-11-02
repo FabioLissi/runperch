@@ -13,6 +13,7 @@ using namespace runperch;
 int main(int argc,char** argv) {
     QApplication app(argc,argv);
     app.setOrganizationName("Runperch"); app.setApplicationName("Runperch"); app.setApplicationVersion(RUNPERCH_VERSION);
+    app.setWindowIcon(QIcon(":/assets/logo.png"));
     app.setQuitOnLastWindowClosed(!QSystemTrayIcon::isSystemTrayAvailable());
     QCommandLineParser parser; parser.setApplicationDescription("Your runners, in view.");
     parser.addHelpOption(); parser.addVersionOption();
@@ -28,12 +29,16 @@ int main(int argc,char** argv) {
     QObject::connect(&app,&QCoreApplication::aboutToQuit,&executor,&ProcessExecutor::cancel);
     auto platform=createPlatform(executor);
     GitHubProvider github(executor,platform->githubExecutable());
+    github.setRunnerStatusAccessEnabled(QSettings().value("runnerManagementStatus",false).toBool());
+    GitHubAuth auth(executor,platform->githubExecutable());
+    QObject::connect(&app,&QCoreApplication::aboutToQuit,&auth,&GitHubAuth::cancel);
     Monitor monitor(*platform,github);
     monitor.setInterval(savedRefreshInterval());
     QStringList paths=savedRunnerDirectories(); paths.append(parser.values("runner")); paths.removeDuplicates();
     QStringList invalid;
     for(const auto& path : paths) { QString error; if(!monitor.add(path,&error)) invalid << error; }
-    Window window(monitor,*platform); window.show();
+    Window window(monitor,*platform,&auth); window.show();
+    if(!parser.isSet("screenshot")) auth.check();
     if(!invalid.isEmpty()) QTimer::singleShot(0,&window,[&] { QMessageBox::warning(&window,"Runner configuration",invalid.join('\n')); });
     if(parser.isSet("screenshot")) {
         auto capture=[&] { app.exit(window.grab().save(parser.value("screenshot")) ? 0 : 2); };

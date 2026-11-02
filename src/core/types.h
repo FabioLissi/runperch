@@ -41,6 +41,15 @@ struct RemoteObservation {
     QString jobUrl;
     qint64 jobId = 0;
     QDateTime startedAt;
+    QString lastJobName;
+    QString lastJobUrl;
+    QString lastConclusion;
+    qint64 lastJobId = 0;
+    QDateTime lastCompletedAt;
+    bool jobsReadable = false;
+    bool workflowsReadable = false;
+    bool runnerStatusReadable = false;
+    QString permissionDetail;
 };
 struct Runner {
     quint64 instanceId = 0;

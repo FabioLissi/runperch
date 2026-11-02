@@ -19,11 +19,13 @@ int main(int argc, char** argv) {
     parser.addOption({{"r","runner"},"Existing runner directory (repeatable).", "directory"});
     parser.addOption({"discover","Include platform-suggested runner installations."});
     parser.addOption({"local-only","Do not query GitHub."});
+    parser.addOption({"runner-status","Also query the optional GitHub runner-management API (requires extra permissions)."});
     parser.process(app);
     ProcessExecutor executor;
     QObject::connect(&app,&QCoreApplication::aboutToQuit,&executor,&ProcessExecutor::cancel);
     auto platform=createPlatform(executor);
     GitHubProvider github(executor,platform->githubExecutable());
+    github.setRunnerStatusAccessEnabled(parser.isSet("runner-status"));
     Monitor monitor(*platform,github);
     QStringList paths=parser.values("runner");
     if(parser.isSet("discover")) paths.append(platform->suggestedRunnerDirectories());

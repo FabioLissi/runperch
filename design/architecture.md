@@ -1,5 +1,8 @@
 # Runperch 0.1: existing-runner monitor
 
+The 0.2 GitHub connection, recent-activity and icon additions have their complete
+reference conformance table in [authorization.md](authorization.md).
+
 ## Before / after / reason
 
 | Before | After | Reason |
@@ -35,7 +38,7 @@ revalidated on new macOS versions; it is not advertised as a stable launchd API.
 | Attach to an already configured official runner | Read only bounded `.runner` and `.service` metadata | BOM, missing, malformed, invalid URL and symlink cases |
 | Preserve service user/session and configuration | Native adapter inspects existing LaunchAgent plist | Verify label, directory and exact runsvc.sh before enabling controls |
 | Separate local service state from remote connection | Independent fields and timestamps | State contract tests; CLI real local inspection |
-| Report online/busy from runner API | Existing GitHub CLI authentication, read-only API calls | Permission failure stays Unknown |
+| Report online/busy from runner API only when explicitly enabled | Optional management-status setting; off by default | Normal monitoring tests forbid runner API requests; permission failure stays Unknown |
 | Identify current job / step from workflow API | Bounded in-progress workflow lookup, exact runner ID matching | Absence of a job never implies Idle; repository-scoped fallback only |
 | Query lifecycle asynchronously | Bounded QProcess, no shell and no blocking waits | Failed start, nonzero, timeout and output-cap tests |
 | Show icon and menu when tray exists | QSystemTrayIcon with full window fallback | Native macOS smoke; Windows/Linux initially compile-only targets |
@@ -59,7 +62,7 @@ UI updates are event-driven. Refresh has an overlap guard; each external command
 has a deadline and output cap. Poll interval defaults to 15 seconds, configurable
 from 5 to 3600 seconds. Command deadline defaults to 8 seconds, command output to
 2 MiB, registration metadata to 64 KiB, and workflow detail lookup to 3 recent
-active runs. These are operational bounds, not tracking/algorithm thresholds.
+active plus 3 recent completed runs. These are operational bounds, not tracking/algorithm thresholds.
 An incomplete lookup leaves unknowns explicit.
 Observations expire after 30 seconds (`observationFreshnessSeconds` owns that
 policy); table labels and control admission share the policy. Service changes

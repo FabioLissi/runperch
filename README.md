@@ -22,6 +22,8 @@ and open the current job without hunting through terminals.
 - **Resource observations:** process-tree CPU, aggregate RSS and free disk.
 - **Menu bar / tray:** see runner states and open the main window quickly.
 - **Local history:** a bounded list of jobs observed while Runperch runs.
+- **Connect GitHub:** browser/device sign-in through GitHub CLI, with account identity and no token copying.
+- **Recent results:** latest matched completed jobs and their server-reported outcomes.
 - **Explicit controls:** start the existing service; stop requires fresh idle
   evidence, confirmation and another status check.
 - **JSON CLI:** the same monitor, validation and policy for scripts.
@@ -90,7 +92,8 @@ ctest --test-dir build --output-on-failure
 
 On macOS, install Qt with `brew install qtbase` and, if CMake needs it, add
 `-DCMAKE_PREFIX_PATH="$(brew --prefix qtbase)"` to configuration. Use
-`brew install gh` and `gh auth login` for GitHub access. This builds a development
+`brew install gh` for GitHub access. Use **Connect GitHub** in the app or
+`gh auth login` in Terminal. This builds a development
 app, not a self-contained signed/notarized distribution.
 
 ```sh
@@ -102,13 +105,23 @@ build/runperchctl --runner /path/to/actions-runner
 Use **Add existing runner** to select a configured installation. macOS suggests
 top-level `~/actions-runner*` directories on first launch, asking before saving
 them. Other locations are supported through the folder picker or `--runner`.
-Monitoring does not require runner administration privileges; GitHub's runner
-availability API does require additional permissions. If unavailable, Runperch
-can still find an active repository job by exact runner ID/name, but absence of
-a matching job is **Unknown**, never proof that the runner is idle. The fallback
-examines up to three recent active workflows and the first 100 jobs in each.
-Organization-scoped registrations need runner-read permissions; repository-job
-fallback is not available for them. Enterprise hosts are not supported yet.
+Normal monitoring uses local service observations and readable GitHub job APIs;
+it does not request runner-administration access. Active runs and recent
+completed runs are inspected independently, each bounded to three workflows
+and the first 100 jobs per workflow. Jobs must match runner ID and name.
+No match is **Unknown**, never proof that the runner is idle.
+
+The runner-management status endpoint is optional, disabled by default, and
+available through Settings or CLI `--runner-status`. It needs additional role
+and token permissions. Organization-scoped registrations have no repository
+for job lookup, so their default view provides local service observations.
+Enterprise hosts are not supported yet.
+
+Browser authorization uses GitHub CLI's standard repo/read:org/gist OAuth scopes;
+these are distinct from repository administrator roles. Signing in can change
+the active gh account shared with other applications. GitHub CLI normally uses
+OS secure storage, but may fall back to its own plaintext configuration when
+secure storage is unavailable. Runperch does not receive or persist the token.
 
 ### CLI examples
 
@@ -131,6 +144,9 @@ successful query is not a health verdict: inspect the returned states.
 - Stop is enabled only after a fresh GitHub Idle observation, requires explicit
   confirmation and rechecks status. A new job can race the check: this is
   **service stop**, not guaranteed finish-current-job draining.
+- With runner-management checks disabled, stop remains unavailable because
+  absence of an active job is insufficient idle evidence. No admin access is
+  required merely to monitor the service, metrics or readable job activity.
 - No controls automatically run when the app launches, closes or refreshes.
 - Closing the window leaves its tray entry running where available. **Quit
   Runperch** closes the monitor and leaves runners untouched.

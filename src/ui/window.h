@@ -1,5 +1,6 @@
 #pragma once
 #include "core/monitor.h"
+#include "core/auth.h"
 #include <QMainWindow>
 #include <QSystemTrayIcon>
 
@@ -12,7 +13,7 @@ namespace runperch {
 class Window final : public QMainWindow {
     Q_OBJECT
 public:
-    Window(Monitor&, Platform&, QWidget* parent=nullptr);
+    Window(Monitor&, Platform&, GitHubAuth* auth=nullptr, QWidget* parent=nullptr);
 protected:
     void closeEvent(QCloseEvent*) override;
 private:
@@ -22,10 +23,13 @@ private:
     void addRunner();
     void settings();
     void history();
+    void authorization();
     void control(ServiceAction);
     void persist();
     Monitor& monitor;
     Platform& platform;
+    GitHubAuth* auth;
+    QPushButton* connectButton;
     QTableWidget* table;
     QLabel* summary;
     QLabel* title;

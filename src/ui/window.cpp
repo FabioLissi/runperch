@@ -3,6 +3,8 @@
 #include "runperch_version.h"
 #include <QApplication>
 #include <QCloseEvent>
+#include <QClipboard>
+#include <QCheckBox>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -45,7 +47,7 @@ QColor stateColor(const QString& state) {
     return QColor("#66716b");
 }
 }
-Window::Window(Monitor& m, Platform& p, QWidget* parent) : QMainWindow(parent),monitor(m),platform(p) {
+Window::Window(Monitor& m, Platform& p, GitHubAuth* a, QWidget* parent) : QMainWindow(parent),monitor(m),platform(p),auth(a) {
     setWindowTitle("Runperch"); resize(1120,780); setMinimumSize(760,600);
     setWindowIcon(QIcon(":/assets/logo.png"));
     auto* central=new QWidget; setCentralWidget(central);
@@ -61,10 +63,20 @@ Window::Window(Monitor& m, Platform& p, QWidget* parent) : QMainWindow(parent),m
     nav->addSpacing(12); nav->addWidget(label(QString("Version %1").arg(RUNPERCH_VERSION),"muted")); row->addWidget(side);
     auto* content=new QWidget; auto* column=new QVBoxLayout(content); column->setContentsMargins(25,25,25,12); column->setSpacing(12);
     auto* heading=new QHBoxLayout; heading->addWidget(label("Runners","heading")); heading->addStretch();
+    connectButton=new QPushButton("Connect GitHub"); heading->addWidget(connectButton);
+    connectButton->setEnabled(auth!=nullptr);
+    connect(connectButton,&QPushButton::clicked,this,&Window::authorization);
+    if(auth) {
+        connect(auth,&GitHubAuth::changed,this,[this] {
+            connectButton->setText(auth->login().isEmpty() ? "Connect GitHub" : "GitHub: " + auth->login());
+            connectButton->setToolTip(auth->detail());
+        });
+        connect(auth,&GitHubAuth::connected,this,[this] { monitor.refresh(); });
+    }
     auto* refresh=new QPushButton("Refresh"); heading->addWidget(refresh);
     auto* add=new QPushButton("+ Add existing runner"); heading->addWidget(add); column->addLayout(heading);
     summary=label("No runners added","muted"); column->addWidget(summary);
-    table=new QTableWidget(0,4); table->setHorizontalHeaderLabels({"Runner","Status","Current job","Elapsed"});
+    table=new QTableWidget(0,4); table->setHorizontalHeaderLabels({"Runner","Status","Current / latest job","Elapsed"});
     table->setObjectName("runnerTable");
     table->setSelectionBehavior(QAbstractItemView::SelectRows); table->setSelectionMode(QAbstractItemView::SingleSelection);
     table->setEditTriggers(QAbstractItemView::NoEditTriggers); table->setShowGrid(false);
@@ -130,7 +142,8 @@ Window::Window(Monitor& m, Platform& p, QWidget* parent) : QMainWindow(parent),m
     });
     connect(githubButton,&QPushButton::clicked,this,[this] {
         int i=table->currentRow(); if(i>=0 && i<monitor.runners().size()) {
-            auto& r=monitor.runners()[i]; QDesktopServices::openUrl(QUrl(r.remote.jobUrl.isEmpty() ? r.registration.githubUrl : r.remote.jobUrl));
+            auto& r=monitor.runners()[i]; QDesktopServices::openUrl(QUrl(!r.remote.jobUrl.isEmpty() ? r.remote.jobUrl
+                : !r.remote.lastJobUrl.isEmpty() ? r.remote.lastJobUrl : r.registration.githubUrl));
         }
     });
     connect(logs,&QPushButton::clicked,this,[this] {
@@ -163,11 +176,14 @@ void Window::addRunner() {
 }
 void Window::rebuild() {
     QSignalBlocker blocker(table);
-    table->setRowCount(monitor.runners().size()); int selected=-1; int running=0,idle=0,stopped=0,unknown=0;
+    table->setRowCount(monitor.runners().size()); int selected=-1; int running=0,idle=0,stopped=0,unknown=0,local=0;
     for(int i=0;i<monitor.runners().size();++i) {
         const auto& r=monitor.runners()[i]; const auto state=status(r);
         running += state=="Running"; idle += state=="Idle"; stopped += state=="Stopped"; unknown += state=="Unknown" || state=="Offline";
-        QStringList values{r.registration.name,state,r.remote.jobName.isEmpty() ? r.remote.detail : r.remote.jobName,elapsed(r.remote.startedAt)};
+        local += state=="Service running";
+        const QString job=!r.remote.jobName.isEmpty() ? r.remote.jobName : !r.remote.lastJobName.isEmpty()
+            ? "Latest: " + r.remote.lastJobName + " · " + r.remote.lastConclusion : "Job visibility unavailable";
+        QStringList values{r.registration.name,state,job,elapsed(r.remote.startedAt)};
         for(int c=0;c<values.size();++c) {
             auto* item=new QTableWidgetItem(values[c]); item->setToolTip(values[c]);
             if(c==1) item->setForeground(stateColor(state)); table->setItem(i,c,item);
@@ -176,7 +192,7 @@ void Window::rebuild() {
     }
     if(selected<0 && !monitor.runners().isEmpty()) selected=0;
     if(selected>=0) { table->selectRow(selected); selectedRoot=monitor.runners()[selected].registration.root; }
-    summary->setText(QString("%1 running   ·   %2 idle   ·   %3 stopped   ·   %4 unknown / offline").arg(running).arg(idle).arg(stopped).arg(unknown));
+    summary->setText(QString("%1 working   ·   %2 idle   ·   %3 service running   ·   %4 stopped   ·   %5 unknown / offline").arg(running).arg(idle).arg(local).arg(stopped).arg(unknown));
     details(); trayMenu();
 }
 void Window::details() {
@@ -190,15 +206,19 @@ void Window::details() {
     title->setText(r.remote.jobName.isEmpty() ? r.registration.name : r.remote.jobName);
     identity->setText(r.registration.githubUrl + (r.remote.workflowName.isEmpty() ? "" : " · " + r.remote.workflowName));
     states->setText("Service: " + text(isFresh(r.service.observedAt) ? r.service.state : ServiceState::Unknown)
-       + "     GitHub: " + text(isFresh(r.remote.observedAt) ? r.remote.connection : ConnectionState::Unknown)
+       + "     Runner availability: " + text(isFresh(r.remote.observedAt) ? r.remote.connection : ConnectionState::Unknown)
        + "     Job: " + text(isFresh(r.remote.observedAt) ? r.remote.job : JobState::Unknown));
-    activity->setText(!r.remote.stepName.isEmpty() ? r.remote.stepName : !r.remote.jobName.isEmpty() ? r.remote.jobName : r.remote.detail.isEmpty() ? "Waiting for an observation" : r.remote.detail);
+    activity->setText(!r.remote.stepName.isEmpty() ? r.remote.stepName : !r.remote.jobName.isEmpty() ? r.remote.jobName
+        : !r.remote.lastJobName.isEmpty() ? "Last job: " + r.remote.lastJobName + " · " + r.remote.lastConclusion
+        : r.remote.jobsReadable ? "No job matched in the recent GitHub results"
+        : r.remote.workflowsReadable ? "Workflow list available; no job details observed" : "GitHub job observations unavailable");
     QString cpu=r.service.cpuCores ? QString::number(*r.service.cpuCores,'f',2) + " cores" : "—";
     QString memory=r.service.rssBytes ? QString::number(*r.service.rssBytes/1073741824.0,'f',2) + " GB" : "—";
     QString disk=r.service.freeDiskBytes ? QString::number(*r.service.freeDiskBytes/1073741824.0,'f',0) + " GB" : "—";
     resources->setText("CPU: " + cpu + "      RSS: " + memory + "      Free disk: " + disk + "      Elapsed: " + elapsed(r.remote.startedAt));
     resources->setToolTip("CPU is the process tree's aggregate core usage; RSS sums resident memory and can count shared pages more than once. Free disk is the runner installation volume.");
-    explanation->setText(r.service.detail + "\n" + r.remote.detail);
+    explanation->setText(r.service.detail + "\n" + (r.remote.jobsReadable ? "Job history readable. " : "")
+        + r.remote.permissionDetail + (r.remote.lastCompletedAt.isValid() ? "\nLatest completion: " + r.remote.lastCompletedAt.toLocalTime().toString("yyyy-MM-dd HH:mm:ss") : ""));
     auto stamp=[](QDateTime t) { return t.isValid() ? t.toLocalTime().toString("HH:mm:ss") + (isFresh(t) ? "" : " (stale)") : "not observed"; };
     observed->setText((r.refreshing ? "Refreshing…  " : "") + QString("Service: %1 · GitHub: %2").arg(stamp(r.service.observedAt),stamp(r.remote.observedAt)));
     auto start=canControl(r,ServiceAction::Start,QDateTime::currentDateTimeUtc());
@@ -230,6 +250,7 @@ void Window::trayMenu() {
     menu->addAction("Add existing runner…",this,&Window::addRunner);
     menu->addAction("Refresh",this,[this] { monitor.refresh(); });
     menu->addAction("Settings…",this,&Window::settings);
+    if(auth) menu->addAction("Connect GitHub…",this,&Window::authorization);
     menu->addSeparator(); menu->addAction("Quit Runperch",qApp,&QApplication::quit);
     tray->setToolTip(QString("Runperch · %1 runner(s)").arg(monitor.runners().size()));
 }
@@ -249,19 +270,53 @@ void Window::settings() {
     QDialog dialog(this); dialog.setWindowTitle("Runperch settings"); auto* layout=new QVBoxLayout(&dialog);
     auto* form=new QFormLayout; auto* seconds=new QSpinBox; seconds->setRange(5,3600); seconds->setSuffix(" seconds"); seconds->setValue(savedRefreshInterval());
     form->addRow("Refresh interval",seconds); layout->addLayout(form);
-    layout->addWidget(label("GitHub access uses your existing gh authentication. Run gh auth login in Terminal if needed. No credentials are copied into Runperch."));
+    auto* management=new QCheckBox("Query GitHub runner-management status (optional; extra permissions)");
+    management->setChecked(QSettings().value("runnerManagementStatus",false).toBool()); layout->addWidget(management);
+    layout->addWidget(label("GitHub access uses GitHub CLI authorization. Use Connect GitHub in the main window for browser sign-in. No credentials are copied into Runperch."));
     layout->addWidget(label("Runperch is licensed under Apache 2.0. Qt is dynamically linked under its open-source licenses. See THIRD_PARTY_NOTICES.md for distribution requirements."));
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Save|QDialogButtonBox::Cancel); layout->addWidget(buttons);
     connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept); connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
-    if(dialog.exec()==QDialog::Accepted) { saveRefreshInterval(seconds->value()); monitor.setInterval(seconds->value()); }
+    if(dialog.exec()==QDialog::Accepted) {
+        saveRefreshInterval(seconds->value()); monitor.setInterval(seconds->value());
+        QSettings().setValue("runnerManagementStatus",management->isChecked());
+        monitor.setRunnerStatusAccessEnabled(management->isChecked()); monitor.refresh();
+    }
+}
+void Window::authorization() {
+    if(!auth) return;
+    QDialog dialog(this); dialog.setWindowTitle("Connect GitHub"); dialog.setMinimumWidth(500);
+    auto* layout=new QVBoxLayout(&dialog);
+    layout->addWidget(label("Connect your GitHub account","heading"));
+    layout->addWidget(label("Uses GitHub CLI's official browser authorization and its standard repo/read:org/gist scopes. Signing in can change the active gh account used by other applications. These scopes do not grant repository administrator roles."));
+    auto* account=label(""); auto* statusLabel=label(""); auto* code=label("","heading");
+    layout->addWidget(account); layout->addWidget(statusLabel); layout->addWidget(code);
+    auto* actions=new QHBoxLayout;
+    auto* loginButton=new QPushButton("Sign in with browser"); auto* copy=new QPushButton("Copy code"); auto* browser=new QPushButton("Open GitHub");
+    actions->addWidget(loginButton); actions->addWidget(copy); actions->addWidget(browser); layout->addLayout(actions);
+    auto* retry=new QPushButton("Recheck connection"); layout->addWidget(retry);
+    layout->addWidget(label("GitHub CLI normally uses the OS credential store; if unavailable, it may use its own plaintext configuration. Runperch never receives or saves the token.","muted"));
+    auto* close=new QDialogButtonBox(QDialogButtonBox::Close); layout->addWidget(close);
+    auto update=[&] {
+        account->setText(auth->login().isEmpty() ? "No verified account" : "Signed in as " + auth->login());
+        statusLabel->setText(auth->detail()); code->setText(auth->deviceCode());
+        copy->setEnabled(!auth->deviceCode().isEmpty()); browser->setEnabled(!auth->deviceCode().isEmpty());
+        loginButton->setEnabled(auth->available() && !auth->busy()); retry->setEnabled(!auth->busy());
+    };
+    connect(auth,&GitHubAuth::changed,&dialog,update);
+    connect(loginButton,&QPushButton::clicked,&dialog,[this] { auth->begin(); });
+    connect(retry,&QPushButton::clicked,&dialog,[this] { auth->check(); });
+    connect(copy,&QPushButton::clicked,&dialog,[this] { QApplication::clipboard()->setText(auth->deviceCode()); });
+    connect(browser,&QPushButton::clicked,&dialog,[] { QDesktopServices::openUrl(QUrl("https://github.com/login/device")); });
+    connect(close,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
+    update(); auth->check(); dialog.exec(); auth->cancel();
 }
 void Window::history() {
     QDialog dialog(this); dialog.setWindowTitle("Observed jobs"); dialog.resize(850,380); auto* layout=new QVBoxLayout(&dialog);
     layout->addWidget(label("Jobs seen while Runperch was open. This is not a complete GitHub execution history; completion is not inferred from disappearance.","muted"));
     const auto records=QJsonDocument::fromJson(QSettings().value("history").toByteArray()).array();
-    auto* jobs=new QTableWidget(records.size(),3); jobs->setHorizontalHeaderLabels({"Runner","Job","Last seen"});
+    auto* jobs=new QTableWidget(records.size(),4); jobs->setHorizontalHeaderLabels({"Runner","Job","Reported result","Last seen"});
     jobs->setEditTriggers(QAbstractItemView::NoEditTriggers); jobs->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    for(int i=0;i<records.size();++i) { auto o=records[i].toObject(); QStringList v{o["runner"].toString(),o["job"].toString(),o["last_seen"].toString()};
+    for(int i=0;i<records.size();++i) { auto o=records[i].toObject(); QStringList v{o["runner"].toString(),o["job"].toString(),o["result"].toString(),o["last_seen"].toString()};
         for(int c=0;c<v.size();++c) jobs->setItem(i,c,new QTableWidgetItem(v[c])); }
     layout->addWidget(jobs); dialog.exec();
 }

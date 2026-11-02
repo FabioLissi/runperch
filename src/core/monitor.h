@@ -14,6 +14,7 @@ public:
     QStringList directories() const;
     void refresh(bool localOnly = false);
     void setInterval(int seconds);
+    void setRunnerStatusAccessEnabled(bool enabled) { github.setRunnerStatusAccessEnabled(enabled); }
     void start();
     void control(int index, ServiceAction);
 signals:

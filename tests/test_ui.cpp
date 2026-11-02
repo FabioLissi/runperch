@@ -41,7 +41,7 @@ private slots:
         QCOMPARE(table->item(0,1)->text(),"Idle");
         QTRY_COMPARE_WITH_TIMEOUT(table->item(0,1)->text(),QString("Unknown"),3500);
         auto* states=window.findChild<QLabel*>("runnerStates"); QVERIFY(states);
-        QVERIFY(states->text().contains("Service: Unknown")); QVERIFY(states->text().contains("GitHub: Unknown"));
+        QVERIFY(states->text().contains("Service: Unknown")); QVERIFY(states->text().contains("Runner availability: Unknown"));
     }
 };
 int main(int argc,char** argv) {

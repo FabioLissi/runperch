@@ -44,3 +44,26 @@ is tested with native filesystem symlinks; hosts without symlink privileges
 explicitly skip that one case. launchctl diagnostic parsing is version-qualified.
 No signed/notarized or self-contained binary distribution is claimed by this
 initial development build.
+
+## 0.2.0 connection and activity update
+
+- Local Release build: 6/6 CTest gates passed; core reports 48 passed, zero
+  failures or skips. The added native bundle gate checks the icon metadata,
+  resource and ICNS header. Native Cocoa window capture and normal exit passed.
+- Independent review ran the focused auth/monitoring regressions: 9 QtTest
+  entries passed, zero failures or skips. Source review cleared the changes.
+- A new active-job regression failed on the previous four-request path and
+  passes on the two-request immediate-publication path. The account-generation
+  regression covers delayed pre-login replies, and fake-process authorization
+  tests exercise the exact CLI flags without performing real sign-in.
+- Read-only live observation with a non-admin account returned the running
+  local service, readable job details and the latest successful matched job.
+  Default code-path and request-contract tests prove management requests are
+  disabled; the live receipt itself does not record every requested endpoint.
+- Workflow lint passes. Earlier public macOS/Linux jobs passed, while the
+  Windows core gate failed without test output. A persistent QtTest report is
+  now printed separately in CI to expose that failure; this is diagnostic
+  work, not a claim that Windows is fixed.
+
+Real OAuth approval and live runner service changes remain untested. The
+development app still requires locally installed Qt and gh.

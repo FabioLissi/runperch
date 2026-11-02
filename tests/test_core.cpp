@@ -2,6 +2,7 @@
 #include "core/github.h"
 #include "core/monitor.h"
 #include "core/registration.h"
+#include "core/auth.h"
 #include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
@@ -34,8 +35,11 @@ class FakeExecutor final : public CommandExecutor {
 public:
     QList<CommandResult> results;
     QList<QStringList> calls;
+    bool deferred=false;
+    QList<CommandCallback> callbacks;
     void run(const QString& program,const QStringList& args,CommandCallback cb,int,qsizetype) override {
         calls << (QStringList{program}+args);
+        if(deferred) { callbacks << cb; return; }
         auto result=results.isEmpty() ? CommandResult{} : results.takeFirst(); cb(result);
     }
 };
@@ -119,7 +123,7 @@ private slots:
         QVERIFY(!readRegistration(dir.path()).value);
     }
     void localServiceDoesNotImplyOnlineOrIdle() {
-        auto r=ready(); r.remote={}; QCOMPARE(status(r),"Unknown");
+        auto r=ready(); r.remote={}; QCOMPARE(status(r),"Service running");
         QVERIFY(!canControl(r,ServiceAction::Stop,QDateTime::currentDateTimeUtc()).allowed);
     }
     void stopPolicy_data() {
@@ -153,7 +157,7 @@ private slots:
     }
     void staleStatusIsNotIdle() {
         auto r=ready(); r.remote.observedAt=r.remote.observedAt.addSecs(-31);
-        QCOMPARE(status(r),"Unknown");
+        QCOMPARE(status(r),"Service running");
     }
     void parseActualApiSchemaDoesNotInventIdle() {
         auto out=parseRunnerResponse("{\"runners\":[{\"id\":42,\"status\":\"offline\",\"busy\":false}]}",42);
@@ -173,11 +177,69 @@ private slots:
         job["runner_id"]=42; job["html_url"]="https://evil.invalid/"; QVERIFY(!applyJobResponse(job,r,out));
     }
     void permissionFailureStaysUnknown() {
-        FakeExecutor e; e.results={CommandResult{},CommandResult{true,0,"{\"workflow_runs\":[]}"}};
+        FakeExecutor e; e.results={CommandResult{},CommandResult{true,0,"{\"permissions\":{\"admin\":false}}"},CommandResult{true,0,"{\"workflow_runs\":[]}"},CommandResult{true,0,"{\"workflow_runs\":[]}"}};
         GitHubProvider provider(e,"fake-gh"); bool called=false;
+        provider.setRunnerStatusAccessEnabled(true);
         provider.observe(registration(),[&](RemoteObservation out) { called=true; QCOMPARE(out.job,JobState::Unknown); QCOMPARE(out.connection,ConnectionState::Unknown); });
-        QVERIFY(called); QCOMPARE(e.calls.size(),2);
+        QVERIFY(called); QCOMPARE(e.calls.size(),4);
         for(const auto& call : e.calls) { QVERIFY(call.contains("GET")); QVERIFY(call.contains("github.com")); QVERIFY(!call.contains("POST")); }
+    }
+    void normalMonitoringDoesNotRequestAdministration() {
+        FakeExecutor e; e.results={CommandResult{true,0,"{\"workflow_runs\":[]}"},CommandResult{true,0,"{\"workflow_runs\":[]}"}};
+        GitHubProvider provider(e,"fake-gh"); bool called=false;
+        provider.observe(registration(),[&](RemoteObservation out) { called=true; QVERIFY(out.workflowsReadable); QVERIFY(!out.jobsReadable); QCOMPARE(out.job,JobState::Unknown); });
+        QVERIFY(called); QCOMPARE(e.calls.size(),2);
+        QVERIFY(e.calls[0].last().contains("actions/runs")); QVERIFY(!e.calls[0].last().contains("actions/runners"));
+        QVERIFY(e.calls[0].last().contains("status=in_progress")); QVERIFY(e.calls[1].last().contains("status=completed"));
+    }
+    void completedJobIsEvidenceNotAnIdleInference() {
+        auto job=QJsonDocument::fromJson("{\"id\":17,\"runner_id\":42,\"runner_name\":\"test-runner\",\"status\":\"completed\",\"conclusion\":\"failure\",\"name\":\"Tests\",\"html_url\":\"https://github.com/example/project/actions/runs/12/job/17\",\"completed_at\":\"2026-11-01T10:01:00Z\"}").object();
+        RemoteObservation out; QVERIFY(applyCompletedJob(job,registration(),out)); QCOMPARE(out.lastConclusion,"failure");
+        QCOMPARE(out.job,JobState::Unknown); QCOMPARE(out.connection,ConnectionState::Unknown);
+        job["completed_at"]="2026-11-01T09:01:00Z"; QVERIFY(!applyCompletedJob(job,registration(),out));
+        job["runner_id"]=43; QVERIFY(!applyCompletedJob(job,registration(),out));
+    }
+    void activeJobPublishesWithoutHistoryDelay() {
+        FakeExecutor e;
+        e.results={CommandResult{true,0,"{\"workflow_runs\":[{\"id\":12,\"name\":\"Active workflow\"},{\"id\":11,\"name\":\"Older workflow\"}]}"},
+            CommandResult{true,0,"{\"jobs\":[{\"id\":17,\"runner_id\":42,\"runner_name\":\"test-runner\",\"status\":\"in_progress\",\"name\":\"Build\",\"html_url\":\"https://github.com/example/project/actions/runs/12/job/17\"}]}"}};
+        GitHubProvider provider(e,"fake-gh"); bool called=false;
+        provider.observe(registration(),[&](RemoteObservation out) {
+            called=true; QCOMPARE(out.jobName,"Build"); QCOMPARE(out.workflowName,"Active workflow");
+            QVERIFY(out.jobsReadable); QCOMPARE(out.job,JobState::Running);
+        });
+        QVERIFY(called); QCOMPARE(e.calls.size(),2);
+    }
+    void deviceCodeParserShowsNoOtherCliOutput() {
+        QCOMPARE(extractDeviceCode("! First copy your one-time code: ABCD-1234\nOpen this URL to continue..."),"ABCD-1234");
+        QCOMPARE(extractDeviceCode("! First copy your one-time code: \033[1mABCD-1234\033[0m\n"),"ABCD-1234");
+        QCOMPARE(extractDeviceCode("! One-time code (ABCD-1234) copied to clipboard\n"),"ABCD-1234");
+        QVERIFY(extractDeviceCode("token=ghp_not_a_device_code\n").isEmpty());
+        QVERIFY(extractDeviceCode("server sent ABCD-1234 without a code prompt").isEmpty());
+    }
+    void authorizationUsesOfficialFlowAndVerifiesAccount() {
+        FakeExecutor executor; executor.results={CommandResult{true,0,"{\"login\":\"octocat\"}"}};
+        GitHubAuth auth(executor,QCoreApplication::applicationFilePath()); QSignalSpy connected(&auth,&GitHubAuth::connected);
+        auth.begin(); QTRY_COMPARE(connected.count(),1); QCOMPARE(auth.login(),"octocat"); QVERIFY(auth.deviceCode().isEmpty());
+        QCOMPARE(executor.calls.size(),1); QVERIFY(executor.calls[0].contains("user"));
+    }
+    void preLoginAccountResponseCannotVerifyNewLogin() {
+        FakeExecutor executor; executor.deferred=true;
+        GitHubAuth auth(executor,QCoreApplication::applicationFilePath());
+        QSignalSpy connected(&auth,&GitHubAuth::connected);
+        auth.check(); QCOMPARE(executor.callbacks.size(),1);
+        auto old=executor.callbacks.takeFirst();
+        auth.begin(); QTRY_COMPARE(executor.callbacks.size(),1);
+        executor.callbacks.takeFirst()(CommandResult{true,0,"{\"login\":\"new-account\"}"});
+        old(CommandResult{true,0,"{\"login\":\"old-account\"}"});
+        QCOMPARE(auth.login(),"new-account"); QCOMPARE(connected.count(),1);
+    }
+    void cancelledAuthorizationNeverClaimsConnected() {
+        FakeExecutor executor;
+        GitHubAuth auth(executor,QCoreApplication::applicationFilePath());
+        QSignalSpy connected(&auth,&GitHubAuth::connected);
+        auth.begin(); auth.cancel(); QTRY_VERIFY(!auth.busy());
+        QCOMPARE(connected.count(),0); QVERIFY(auth.deviceCode().isEmpty());
     }
     void overlapRefreshDoesNotDuplicateQueries() {
         QTemporaryDir dir; writeFile(dir.filePath(".runner"),registrationData());
@@ -244,6 +306,12 @@ private slots:
 };
 int main(int argc,char** argv) {
     QCoreApplication app(argc,argv);
+    if(app.arguments().value(1)=="auth") {
+        const QStringList expected{"auth","login","--web","--hostname","github.com","--skip-ssh-key","--clipboard=false"};
+        if(app.arguments().mid(1)!=expected) return 3;
+        QTextStream(stderr)<<"! First copy your one-time code: ABCD-1234\n";
+        QTimer::singleShot(50,&app,&QCoreApplication::quit); return app.exec();
+    }
     if(app.arguments().contains("--process-fixture=echo")) { QTextStream(stdout)<<"runner producer output\n"; QTextStream(stderr)<<"private-stderr\n"; return 0; }
     if(app.arguments().contains("--process-fixture=large")) { QTextStream(stdout)<<QString(10000,'x'); return 0; }
     if(app.arguments().contains("--process-fixture=wait")) { QTimer::singleShot(10000,&app,&QCoreApplication::quit); return app.exec(); }

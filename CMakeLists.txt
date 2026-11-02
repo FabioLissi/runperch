@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(Runperch VERSION 0.1.0 LANGUAGES CXX)
+project(Runperch VERSION 0.2.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -12,7 +12,7 @@ configure_file(src/version.h.in generated/runperch_version.h @ONLY)
 add_library(runperch_core
   src/core/types.h src/core/state.cpp src/core/registration.cpp
   src/core/command.cpp src/core/github.cpp src/core/monitor.cpp
-  src/core/catalog.cpp src/platform/platform.h)
+  src/core/catalog.cpp src/core/auth.cpp src/core/auth.h src/platform/platform.h)
 target_include_directories(runperch_core PUBLIC src "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(runperch_core PUBLIC Qt6::Core)
 if(APPLE)
@@ -30,6 +30,16 @@ target_link_libraries(runperchctl PRIVATE runperch_core)
 add_executable(runperch MACOSX_BUNDLE src/ui/main.cpp src/ui/window.cpp src/ui/window.h)
 qt_add_resources(runperch assets PREFIX / FILES assets/logo.png)
 target_link_libraries(runperch PRIVATE runperch_core Qt6::Widgets)
+if(APPLE)
+  set(app_icon "${CMAKE_CURRENT_BINARY_DIR}/Runperch.icns")
+  add_custom_command(OUTPUT "${app_icon}"
+    COMMAND ${CMAKE_COMMAND} "-DSOURCE_PNG=${CMAKE_CURRENT_SOURCE_DIR}/assets/logo.png"
+      "-DOUTPUT_ICNS=${app_icon}" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/macos/GenerateIcon.cmake"
+    DEPENDS assets/logo.png cmake/macos/GenerateIcon.cmake VERBATIM)
+  set_source_files_properties("${app_icon}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+  target_sources(runperch PRIVATE "${app_icon}")
+  set_target_properties(runperch PROPERTIES MACOSX_BUNDLE_ICON_FILE Runperch.icns)
+endif()
 set_target_properties(runperch PROPERTIES
   MACOSX_BUNDLE_BUNDLE_NAME Runperch
   MACOSX_BUNDLE_GUI_IDENTIFIER org.runperch.desktop
@@ -42,8 +52,10 @@ if(BUILD_TESTING)
   target_link_libraries(runperch_tests PRIVATE runperch_core Qt6::Test)
   if(APPLE)
     target_compile_definitions(runperch_tests PRIVATE RUNPERCH_MACOS_TESTS)
+    add_test(NAME macos_bundle_icon COMMAND ${CMAKE_COMMAND}
+      "-DAPP_PATH=$<TARGET_BUNDLE_DIR:runperch>" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_macos_bundle.cmake")
   endif()
-  add_test(NAME core COMMAND runperch_tests -o -,txt)
+  add_test(NAME core COMMAND runperch_tests -o -,txt -o "${CMAKE_CURRENT_BINARY_DIR}/core-results.txt,txt")
   add_executable(runperch_ui_tests tests/test_ui.cpp src/ui/window.cpp src/ui/window.h)
   qt_add_resources(runperch_ui_tests assets PREFIX / FILES assets/logo.png)
   target_link_libraries(runperch_ui_tests PRIVATE runperch_core Qt6::Widgets Qt6::Test)

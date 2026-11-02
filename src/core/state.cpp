@@ -26,6 +26,7 @@ QString status(const Runner& r) {
     if(fresh(r.service.observedAt) && fresh(r.remote.observedAt)
        && r.service.state == ServiceState::Running && r.remote.connection == ConnectionState::Online
        && r.remote.job == JobState::Idle) return "Idle";
+    if(fresh(r.service.observedAt) && r.service.state==ServiceState::Running) return "Service running";
     return "Unknown";
 }
 ControlDecision canControl(const Runner& r, ServiceAction a, QDateTime now, int maxAge) {
@@ -61,6 +62,10 @@ QJsonObject toJson(const Runner& r) {
            {"observed_at", r.remote.observedAt.toString(Qt::ISODate)},
            {"job_name", r.remote.jobName}, {"workflow", r.remote.workflowName},
            {"step", r.remote.stepName}, {"job_url", r.remote.jobUrl},
-           {"job_id", r.remote.jobId}, {"started_at", r.remote.startedAt.toString(Qt::ISODate)}}}};
+           {"job_id", r.remote.jobId}, {"started_at", r.remote.startedAt.toString(Qt::ISODate)},
+           {"latest_job_name",r.remote.lastJobName},{"latest_job_url",r.remote.lastJobUrl},
+           {"latest_conclusion",r.remote.lastConclusion},{"latest_completed_at",r.remote.lastCompletedAt.toString(Qt::ISODate)},
+           {"runner_status_readable",r.remote.runnerStatusReadable},{"jobs_readable",r.remote.jobsReadable},
+           {"permission_detail",r.remote.permissionDetail}}}};
 }
 }
