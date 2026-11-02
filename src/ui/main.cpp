@@ -13,7 +13,7 @@ using namespace runperch;
 int main(int argc,char** argv) {
     QApplication app(argc,argv);
     app.setOrganizationName("Runperch"); app.setApplicationName("Runperch"); app.setApplicationVersion(RUNPERCH_VERSION);
-    app.setWindowIcon(QIcon(":/assets/logo.png"));
+    app.setWindowIcon(QIcon(":/assets/app-icon.png"));
     app.setQuitOnLastWindowClosed(!QSystemTrayIcon::isSystemTrayAvailable());
     QCommandLineParser parser; parser.setApplicationDescription("Your runners, in view.");
     parser.addHelpOption(); parser.addVersionOption();

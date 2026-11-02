@@ -49,7 +49,7 @@ QColor stateColor(const QString& state) {
 }
 Window::Window(Monitor& m, Platform& p, GitHubAuth* a, QWidget* parent) : QMainWindow(parent),monitor(m),platform(p),auth(a) {
     setWindowTitle("Runperch"); resize(1120,780); setMinimumSize(760,600);
-    setWindowIcon(QIcon(":/assets/logo.png"));
+    setWindowIcon(QIcon(":/assets/app-icon.png"));
     auto* central=new QWidget; setCentralWidget(central);
     auto* row=new QHBoxLayout(central); row->setContentsMargins(0,0,0,0); row->setSpacing(0);
     auto* side=new QWidget; side->setObjectName("sidebar"); side->setFixedWidth(185);

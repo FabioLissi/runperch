@@ -26,6 +26,19 @@ public:
 class UiTests : public QObject {
     Q_OBJECT
 private slots:
+    void applicationIconRemainsVisibleAgainstDarkDock() {
+        TestPlatform platform; TestRemote remote; Monitor monitor(platform,remote);
+        Window window(monitor,platform);
+        const auto image=window.windowIcon().pixmap(32,32).toImage().scaled(32,32);
+        QVERIFY(!image.isNull());
+        // The real window icon must carry its own light backing at Dock size.
+        for(const QPoint p : {QPoint(16,4),QPoint(4,16),QPoint(27,16),QPoint(16,27)}) {
+            const auto c=image.pixelColor(p);
+            QVERIFY2(c.alpha()>240 && c.lightness()>210,"Dock icon has no visible light backing");
+        }
+        const auto mark=image.pixelColor(11,18);
+        QVERIFY(mark.alpha()>240 && mark.lightness()<100);
+    }
     void stalePresentationChangesWithoutNetworkRefresh() {
         QTemporaryDir runner;
         QFile file(runner.filePath(".runner")); QVERIFY(file.open(QIODevice::WriteOnly));
