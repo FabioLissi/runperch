@@ -1,7 +1,8 @@
-# Runperch 0.1: existing-runner monitor
+# Runperch architecture
 
 The 0.2 GitHub connection, recent-activity and icon additions have their complete
-reference conformance table in [authorization.md](authorization.md).
+reference conformance table in [authorization.md](authorization.md). Version 0.4
+local controls are specified in [local-service-controls.md](local-service-controls.md).
 
 ## Before / after / reason
 
@@ -42,7 +43,7 @@ revalidated on new macOS versions; it is not advertised as a stable launchd API.
 | Identify current job / step from workflow API | Bounded in-progress workflow lookup, exact runner ID matching | Absence of a job never implies Idle; repository-scoped fallback only |
 | Query lifecycle asynchronously | Bounded QProcess, no shell and no blocking waits | Failed start, nonzero, timeout and output-cap tests |
 | Show icon and menu when tray exists | QSystemTrayIcon with full window fallback | Native macOS smoke; Windows/Linux initially compile-only targets |
-| Service stop is explicit | Shared policy requires fresh remote Idle and explicit confirmation | No atomic drain claim; a new assignment can race the check |
+| Service stop is explicit | UI Stop now requires confirmation and fresh local Running; conservative API callers retain IdleOnly | No atomic drain claim; local identity/status is rechecked at the write path |
 | Avoid changing monitored service on app shutdown | Only terminate Runperch-owned query subprocesses | No runner kill, stop or uninstall on close |
 
 This is not a replacement runner or fleet orchestrator. No installation,

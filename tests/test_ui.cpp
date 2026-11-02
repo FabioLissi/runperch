@@ -3,6 +3,9 @@
 #include <QFile>
 #include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
+#include <QPushButton>
+#include <QTimer>
 #include <QSettings>
 #include <QTableWidget>
 #include <QTemporaryDir>
@@ -12,16 +15,21 @@ namespace {
 class TestPlatform final : public Platform {
 public:
     ServiceObservation value;
+    int actions=0;
     QString description() const override { return "Test computer"; }
     QStringList suggestedRunnerDirectories() const override { return {}; }
     QString githubExecutable() const override { return {}; }
     void inspect(const Registration&,ServiceCallback cb) override { cb(value); }
-    void act(const Registration&,ServiceAction,ActionCallback cb) override { cb(false,"No service changes in UI tests"); }
+    void act(const Registration&,ServiceAction action,ActionCallback cb) override {
+        ++actions; value.state=action==ServiceAction::Start ? ServiceState::Running : ServiceState::Stopped;
+        value.observedAt=QDateTime::currentDateTimeUtc(); cb(true,"Test service request accepted");
+    }
 };
 class TestRemote final : public RemoteProvider {
 public:
     RemoteObservation value;
-    void observe(const Registration&,RemoteCallback cb) override { cb(value); }
+    int calls=0;
+    void observe(const Registration&,RemoteCallback cb) override { ++calls; cb(value); }
 };
 class TestPresentation final : public ApplicationPresentation {
 public:
@@ -38,6 +46,35 @@ class UiTests : public QObject {
     Q_OBJECT
 private slots:
     void init() { QSettings().clear(); qApp->setQuitOnLastWindowClosed(false); }
+    void localStopRequiresConfirmationAndStartWorksWithoutGitHub() {
+        QTemporaryDir runner;
+        QFile file(runner.filePath(".runner")); QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("{\"agentId\":42,\"agentName\":\"ui-runner\",\"gitHubUrl\":\"https://github.com/example/project\"}"); file.close();
+        TestPlatform platform; TestRemote remote;
+        platform.value.state=ServiceState::Running; platform.value.controlsAvailable=true;
+        platform.value.pid=123; platform.value.observedAt=QDateTime::currentDateTimeUtc();
+        Monitor monitor(platform,remote); QVERIFY(monitor.add(runner.path()));
+        Window window(monitor,platform); window.show(); monitor.refresh(true);
+        auto* stop=window.findChild<QPushButton*>("stopService"); auto* start=window.findChild<QPushButton*>("startService");
+        QVERIFY(stop); QVERIFY(start); QVERIFY(stop->isEnabled()); QVERIFY(!start->isEnabled());
+        auto* states=window.findChild<QLabel*>("runnerStates"); QVERIFY(states->text().contains("PID 123"));
+        auto warning=std::make_shared<bool>(false);
+        QTimer::singleShot(0,&window,[warning] {
+            auto* box=qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+            if(box) { *warning=box->defaultButton()==box->button(QMessageBox::Cancel) && box->text().contains("Unknown") && box->text().contains("interrupt"); box->button(QMessageBox::Cancel)->click(); }
+        });
+        stop->click(); QCOMPARE(platform.actions,0); QVERIFY(*warning);
+        auto accept=[&window](const QString& text) {
+            QTimer::singleShot(0,&window,[text] {
+                auto* box=qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+                if(box) for(auto* button : box->buttons()) if(button->text()==text) { button->click(); break; }
+            });
+        };
+        accept("Stop now"); stop->click(); QCOMPARE(platform.actions,1);
+        QCOMPARE(monitor.runners()[0].service.state,ServiceState::Stopped); QVERIFY(start->isEnabled()); QVERIFY(!stop->isEnabled());
+        accept("Start service"); start->click(); QCOMPARE(platform.actions,2);
+        QCOMPARE(monitor.runners()[0].service.state,ServiceState::Running); QCOMPARE(remote.calls,0);
+    }
     void closeKeepsMenuBarAndReopenRestoresDock() {
         QSettings().setValue("hideDockWhenClosed",true);
         TestPlatform platform; TestRemote remote; Monitor monitor(platform,remote); TestPresentation presence;

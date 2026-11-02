@@ -16,7 +16,7 @@ public:
     void setInterval(int seconds);
     void setRunnerStatusAccessEnabled(bool enabled) { github.setRunnerStatusAccessEnabled(enabled); }
     void start();
-    void control(int index, ServiceAction);
+    void control(int index, ServiceAction, StopAuthorization = StopAuthorization::IdleOnly);
 signals:
     void changed();
     void refreshFinished();

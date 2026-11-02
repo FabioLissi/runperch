@@ -101,8 +101,8 @@ Window::Window(Monitor& m, Platform& p, GitHubAuth* a, ApplicationPresentation* 
     auto* controls=new QHBoxLayout;
     auto* logs=new QPushButton("Open logs folder"); controls->addWidget(logs);
     auto* remove=new QPushButton("Remove from Runperch"); controls->addWidget(remove); controls->addStretch();
-    startButton=new QPushButton("Start service"); controls->addWidget(startButton);
-    stopButton=new QPushButton("Stop service…"); controls->addWidget(stopButton); column->addLayout(controls);
+    startButton=new QPushButton("Start service"); startButton->setObjectName("startService"); controls->addWidget(startButton);
+    stopButton=new QPushButton("Stop service…"); stopButton->setObjectName("stopService"); controls->addWidget(stopButton); column->addLayout(controls);
     column->addWidget(label("Monitoring existing runners · Closing Runperch does not stop them","footer"));
     row->addWidget(content,1);
     setStyleSheet(R"(
@@ -207,7 +207,9 @@ void Window::details() {
     const auto& r=monitor.runners()[i];
     title->setText(r.remote.jobName.isEmpty() ? r.registration.name : r.remote.jobName);
     identity->setText(r.registration.githubUrl + (r.remote.workflowName.isEmpty() ? "" : " · " + r.remote.workflowName));
-    states->setText("Service: " + text(isFresh(r.service.observedAt) ? r.service.state : ServiceState::Unknown)
+    const auto localState=isFresh(r.service.observedAt) ? r.service.state : ServiceState::Unknown;
+    const auto pid=localState==ServiceState::Running && r.service.pid>0 ? QString(" (PID %1)").arg(r.service.pid) : QString();
+    states->setText("Service: " + text(localState) + pid
        + "     Runner availability: " + text(isFresh(r.remote.observedAt) ? r.remote.connection : ConnectionState::Unknown)
        + "     Job: " + text(isFresh(r.remote.observedAt) ? r.remote.job : JobState::Unknown));
     activity->setText(!r.remote.stepName.isEmpty() ? r.remote.stepName : !r.remote.jobName.isEmpty() ? r.remote.jobName
@@ -222,9 +224,11 @@ void Window::details() {
     explanation->setText(r.service.detail + "\n" + (r.remote.jobsReadable ? "Job history readable. " : "")
         + r.remote.permissionDetail + (r.remote.lastCompletedAt.isValid() ? "\nLatest completion: " + r.remote.lastCompletedAt.toLocalTime().toString("yyyy-MM-dd HH:mm:ss") : ""));
     auto stamp=[](QDateTime t) { return t.isValid() ? t.toLocalTime().toString("HH:mm:ss") + (isFresh(t) ? "" : " (stale)") : "not observed"; };
-    observed->setText((r.refreshing ? "Refreshing…  " : "") + QString("Service: %1 · GitHub: %2").arg(stamp(r.service.observedAt),stamp(r.remote.observedAt)));
+    const QString pending=r.changingService ? "Applying service request…  " : r.serviceRefreshing
+        ? "Checking local service…  " : r.remoteRefreshing ? "Refreshing GitHub…  " : "";
+    observed->setText(pending + QString("Service: %1 · GitHub: %2").arg(stamp(r.service.observedAt),stamp(r.remote.observedAt)));
     auto start=canControl(r,ServiceAction::Start,QDateTime::currentDateTimeUtc());
-    auto stop=canControl(r,ServiceAction::Stop,QDateTime::currentDateTimeUtc());
+    auto stop=canControl(r,ServiceAction::Stop,QDateTime::currentDateTimeUtc(),StopAuthorization::ConfirmedImmediate);
     startButton->setEnabled(start.allowed); startButton->setToolTip(start.reason);
     stopButton->setEnabled(stop.allowed); stopButton->setToolTip(stop.reason);
     githubButton->setEnabled(true);
@@ -260,13 +264,21 @@ void Window::control(ServiceAction action) {
     const auto i=table->currentRow(); if(i<0 || i>=monitor.runners().size()) return;
     const auto root=monitor.runners()[i].registration.root;
     const auto name=monitor.runners()[i].registration.name;
+    const auto& selected=monitor.runners()[i];
+    const QString reportedJob=isFresh(selected.remote.observedAt) ? text(selected.remote.job) : "Unknown";
     const QString warning=action==ServiceAction::Stop
-        ? "Stop this runner service? GitHub currently reports it idle, but a new assignment can race this check. Stopping the service can interrupt a job. This is not drain-after-job."
+        ? "Stop this local runner service now? This can interrupt a job; it does not wait for the current job to finish.\n\nGitHub job state: " + reportedJob
         : "Start the existing runner service using its current configuration?";
-    if(QMessageBox::question(this,action==ServiceAction::Stop ? "Stop " + name : "Start " + name,
-        warning,QMessageBox::Yes|QMessageBox::Cancel,QMessageBox::Cancel)!=QMessageBox::Yes) return;
+    QMessageBox confirmation(QMessageBox::Warning,action==ServiceAction::Stop ? "Stop " + name : "Start " + name,
+        warning,QMessageBox::Cancel,this);
+    auto* apply=confirmation.addButton(action==ServiceAction::Stop ? "Stop now" : "Start service",
+        action==ServiceAction::Stop ? QMessageBox::DestructiveRole : QMessageBox::AcceptRole);
+    confirmation.setDefaultButton(QMessageBox::Cancel); confirmation.exec();
+    if(confirmation.clickedButton()!=apply) return;
     // Modal interaction may have refreshed/reordered the table: resolve identity again.
-    for(int n=0;n<monitor.runners().size();++n) if(monitor.runners()[n].registration.root==root) { monitor.control(n,action); break; }
+    for(int n=0;n<monitor.runners().size();++n) if(monitor.runners()[n].registration.root==root) {
+        monitor.control(n,action,action==ServiceAction::Stop ? StopAuthorization::ConfirmedImmediate : StopAuthorization::IdleOnly); break;
+    }
 }
 void Window::settings() {
     QDialog dialog(this); dialog.setWindowTitle("Runperch settings"); auto* layout=new QVBoxLayout(&dialog);

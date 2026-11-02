@@ -24,8 +24,8 @@ and open the current job without hunting through terminals.
 - **Local history:** a bounded list of jobs observed while Runperch runs.
 - **Connect GitHub:** browser/device sign-in through GitHub CLI, with account identity and no token copying.
 - **Recent results:** latest matched completed jobs and their server-reported outcomes.
-- **Explicit controls:** start the existing service; stop requires fresh idle
-  evidence, confirmation and another status check.
+- **Explicit local controls:** start a stopped service or confirm **Stop now**,
+  using fresh local checks without requiring GitHub administration access.
 - **JSON CLI:** the same monitor, validation and policy for scripts.
 - **Honest status:** unknown or expired evidence stays Unknown. No invented
   completion percentages or finish-current-job guarantees.
@@ -141,12 +141,15 @@ successful query is not a health verdict: inspect the returned states.
 - Service, GitHub connection and job state are separate observations.
 - Expired observations are unknown; process existence does not prove online.
 - Start/stop use the existing user LaunchAgent, with identity checked again.
-- Stop is enabled only after a fresh GitHub Idle observation, requires explicit
-  confirmation and rechecks status. A new job can race the check: this is
-  **service stop**, not guaranteed finish-current-job draining.
-- With runner-management checks disabled, stop remains unavailable because
-  absence of an active job is insufficient idle evidence. No admin access is
-  required merely to monitor the service, metrics or readable job activity.
+- Start requires a fresh local Stopped state. **Stop now** requires a fresh
+  local Running state, an explicit confirmation with Cancel selected by default,
+  and another local identity/status check before acting. It can interrupt a job
+  and does not wait for that job to finish.
+- Local controls do not wait for GitHub requests or require a GitHub administrator
+  role. The service PID and local state are displayed separately from GitHub job
+  observations. Local process existence never proves GitHub connectivity or idle.
+- A service request is followed by a local inspection; a rejected command is
+  reported as an error, rather than being assumed successful.
 - No controls automatically run when the app launches, closes or refreshes.
 - On macOS, the red close button leaves Runperch in the menu bar and hides its
   Dock icon. Choose **Open Runperch** in the menu-bar menu to restore both the

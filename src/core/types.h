@@ -9,6 +9,7 @@ enum class ServiceState { Unknown, Running, Stopped };
 enum class ConnectionState { Unknown, Online, Offline };
 enum class JobState { Unknown, Idle, Running };
 enum class ServiceAction { Start, Stop };
+enum class StopAuthorization { IdleOnly, ConfirmedImmediate };
 
 struct Registration {
     QString root;
@@ -57,6 +58,8 @@ struct Runner {
     ServiceObservation service;
     RemoteObservation remote;
     bool refreshing = false;
+    bool serviceRefreshing = false;
+    bool remoteRefreshing = false;
     bool changingService = false;
 };
 struct ControlDecision { bool allowed = false; QString reason; };
@@ -68,6 +71,7 @@ QString text(ConnectionState state);
 QString text(JobState state);
 QString status(const Runner& runner);
 ControlDecision canControl(const Runner& runner, ServiceAction action,
-                           QDateTime now, int maxAgeSeconds = observationFreshnessSeconds);
+                           QDateTime now, StopAuthorization = StopAuthorization::IdleOnly,
+                           int maxAgeSeconds = observationFreshnessSeconds);
 QJsonObject toJson(const Runner& runner);
 }

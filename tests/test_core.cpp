@@ -49,17 +49,26 @@ public:
     QList<ServiceCallback> callbacks;
     int actions=0;
     bool deferred=false;
+    bool reflectActions=false;
+    bool rejectActions=false;
     QString description() const override { return "Test"; }
     QStringList suggestedRunnerDirectories() const override { return {}; }
     QString githubExecutable() const override { return {}; }
     void inspect(const Registration&,ServiceCallback cb) override { if(deferred) callbacks << cb; else cb(observation); }
-    void act(const Registration&,ServiceAction,ActionCallback cb) override { ++actions; cb(true,"accepted"); }
+    void act(const Registration&,ServiceAction action,ActionCallback cb) override {
+        ++actions;
+        if(rejectActions) { cb(false,"Test service request rejected"); return; }
+        if(reflectActions) { observation.state=action==ServiceAction::Start ? ServiceState::Running : ServiceState::Stopped; observation.observedAt=QDateTime::currentDateTimeUtc(); }
+        cb(true,"accepted");
+    }
 };
 class FakeRemote final : public RemoteProvider {
 public:
     RemoteObservation observation;
     int calls=0;
-    void observe(const Registration&,RemoteCallback cb) override { ++calls; cb(observation); }
+    bool deferred=false;
+    QList<RemoteCallback> callbacks;
+    void observe(const Registration&,RemoteCallback cb) override { ++calls; if(deferred) callbacks<<cb; else cb(observation); }
 };
 void writeFile(const QString& path,const QByteArray& data) { QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly)); QCOMPARE(f.write(data),data.size()); }
 }
@@ -150,10 +159,71 @@ private slots:
         if(variant==8) r.remote.observedAt=now.addSecs(2);
         QCOMPARE(canControl(r,ServiceAction::Stop,now).allowed,allowed);
     }
-    void startRequiresStoppedAndNotBusy() {
+    void startUsesConfirmedLocalStoppedState() {
         auto r=ready(); r.service.state=ServiceState::Stopped;
         QVERIFY(canControl(r,ServiceAction::Start,QDateTime::currentDateTimeUtc()).allowed);
-        r.remote.job=JobState::Running; QVERIFY(!canControl(r,ServiceAction::Start,QDateTime::currentDateTimeUtc()).allowed);
+        r.remote.job=JobState::Running; QVERIFY(canControl(r,ServiceAction::Start,QDateTime::currentDateTimeUtc()).allowed);
+    }
+    void confirmedStopUsesFreshLocalStateWithoutInventingIdle() {
+        auto r=ready(); r.remote={};
+        QVERIFY(canControl(r,ServiceAction::Stop,QDateTime::currentDateTimeUtc(),StopAuthorization::ConfirmedImmediate).allowed);
+        QCOMPARE(r.remote.job,JobState::Unknown);
+        QVERIFY(!canControl(r,ServiceAction::Stop,QDateTime::currentDateTimeUtc()).allowed);
+        r.service.observedAt=r.service.observedAt.addSecs(-31);
+        QVERIFY(!canControl(r,ServiceAction::Stop,QDateTime::currentDateTimeUtc(),StopAuthorization::ConfirmedImmediate).allowed);
+    }
+    void explicitStopDoesNotWaitForGitHubAndPublishesLocalState() {
+        QTemporaryDir dir; writeFile(dir.filePath(".runner"),registrationData());
+        FakePlatform p; p.observation=ready().service; p.reflectActions=true;
+        FakeRemote g; g.deferred=true; Monitor monitor(p,g); QVERIFY(monitor.add(dir.path()));
+        monitor.refresh(); QVERIFY(monitor.runners()[0].refreshing);
+        monitor.control(0,ServiceAction::Stop,StopAuthorization::ConfirmedImmediate);
+        QCOMPARE(p.actions,1); QCOMPARE(g.calls,1);
+        QCOMPARE(monitor.runners()[0].service.state,ServiceState::Stopped);
+        auto remote=ready().remote; remote.job=JobState::Running; g.callbacks.takeFirst()(remote);
+        QCOMPARE(status(monitor.runners()[0]),"Stopped");
+    }
+    void startDoesNotWaitForGitHub() {
+        QTemporaryDir dir; writeFile(dir.filePath(".runner"),registrationData());
+        FakePlatform p; p.observation=ready().service; p.observation.state=ServiceState::Stopped; p.reflectActions=true;
+        FakeRemote g; g.deferred=true; Monitor monitor(p,g); QVERIFY(monitor.add(dir.path())); monitor.refresh();
+        monitor.control(0,ServiceAction::Start);
+        QCOMPARE(p.actions,1); QCOMPARE(g.calls,1); QCOMPARE(monitor.runners()[0].service.state,ServiceState::Running);
+        g.callbacks.takeFirst()({});
+    }
+    void explicitStopCannotBypassUnknownLocalStateOrIdentityChange() {
+        auto r=ready(); r.service.state=ServiceState::Unknown;
+        QVERIFY(!canControl(r,ServiceAction::Stop,QDateTime::currentDateTimeUtc(),StopAuthorization::ConfirmedImmediate).allowed);
+        r.service.state=ServiceState::Running; r.service.controlsAvailable=false;
+        QVERIFY(!canControl(r,ServiceAction::Stop,QDateTime::currentDateTimeUtc(),StopAuthorization::ConfirmedImmediate).allowed);
+        QTemporaryDir dir; writeFile(dir.filePath(".runner"),registrationData());
+        FakePlatform p; p.observation=ready().service; FakeRemote g; Monitor monitor(p,g);
+        QVERIFY(monitor.add(dir.path())); monitor.refresh(true); p.deferred=true;
+        monitor.control(0,ServiceAction::Stop,StopAuthorization::ConfirmedImmediate);
+        QCOMPARE(p.callbacks.size(),1);
+        auto changed=registrationData(); changed.replace("42","43"); writeFile(dir.filePath(".runner"),changed);
+        p.callbacks.takeFirst()(p.observation); QCOMPARE(p.actions,0); QVERIFY(!monitor.runners()[0].changingService);
+    }
+    void postActionInspectionSurvivesAnOlderRemoteRefresh() {
+        QTemporaryDir dir; writeFile(dir.filePath(".runner"),registrationData());
+        FakePlatform p; p.observation=ready().service; p.reflectActions=true;
+        FakeRemote g; g.deferred=true; Monitor monitor(p,g); QVERIFY(monitor.add(dir.path())); monitor.refresh();
+        p.deferred=true; monitor.control(0,ServiceAction::Stop,StopAuthorization::ConfirmedImmediate);
+        p.callbacks.takeFirst()(p.observation); QCOMPARE(p.actions,1); QCOMPARE(p.callbacks.size(),1);
+        auto remote=ready().remote; remote.job=JobState::Running; g.callbacks.takeFirst()(remote);
+        QVERIFY(monitor.runners()[0].changingService); QVERIFY(monitor.runners()[0].serviceRefreshing); QVERIFY(monitor.runners()[0].refreshing);
+        p.callbacks.takeFirst()(p.observation);
+        QCOMPARE(status(monitor.runners()[0]),"Stopped"); QVERIFY(!monitor.runners()[0].refreshing); QVERIFY(!monitor.runners()[0].changingService);
+    }
+    void rejectedServiceRequestDoesNotClaimStopped() {
+        QTemporaryDir dir; writeFile(dir.filePath(".runner"),registrationData());
+        FakePlatform p; p.observation=ready().service; p.rejectActions=true;
+        FakeRemote g; Monitor monitor(p,g); QVERIFY(monitor.add(dir.path())); monitor.refresh(true);
+        QSignalSpy messages(&monitor,&Monitor::message);
+        monitor.control(0,ServiceAction::Stop,StopAuthorization::ConfirmedImmediate);
+        QCOMPARE(p.actions,1); QCOMPARE(messages.size(),1); QVERIFY(messages[0][1].toBool());
+        QCOMPARE(monitor.runners()[0].service.state,ServiceState::Running); QVERIFY(!monitor.runners()[0].changingService);
+        QCOMPARE(g.calls,0);
     }
     void staleStatusIsNotIdle() {
         auto r=ready(); r.remote.observedAt=r.remote.observedAt.addSecs(-31);

@@ -20,8 +20,8 @@ QString text(JobState s) {
 QString status(const Runner& r) {
     auto now=QDateTime::currentDateTimeUtc();
     auto fresh=[now](QDateTime time) { return isFresh(time,now); };
-    if(fresh(r.remote.observedAt) && r.remote.job == JobState::Running) return "Running";
     if(fresh(r.service.observedAt) && r.service.state == ServiceState::Stopped) return "Stopped";
+    if(fresh(r.remote.observedAt) && r.remote.job == JobState::Running) return "Running";
     if(fresh(r.remote.observedAt) && r.remote.connection == ConnectionState::Offline) return "Offline";
     if(fresh(r.service.observedAt) && fresh(r.remote.observedAt)
        && r.service.state == ServiceState::Running && r.remote.connection == ConnectionState::Online
@@ -29,8 +29,10 @@ QString status(const Runner& r) {
     if(fresh(r.service.observedAt) && r.service.state==ServiceState::Running) return "Service running";
     return "Unknown";
 }
-ControlDecision canControl(const Runner& r, ServiceAction a, QDateTime now, int maxAge) {
-    if(r.changingService || r.refreshing) return {false, "Wait for the current operation."};
+ControlDecision canControl(const Runner& r, ServiceAction a, QDateTime now, StopAuthorization authorization, int maxAge) {
+    const bool localOnly=a==ServiceAction::Start || authorization==StopAuthorization::ConfirmedImmediate;
+    if(r.changingService || r.serviceRefreshing || (r.refreshing && !r.remoteRefreshing)
+       || (!localOnly && r.remoteRefreshing)) return {false, "Wait for the current local status check or service operation."};
     if(!r.service.controlsAvailable) return {false, "This service cannot be controlled by this adapter."};
     auto fresh = [&](QDateTime time) {
         return isFresh(time,now,maxAge);
@@ -38,17 +40,18 @@ ControlDecision canControl(const Runner& r, ServiceAction a, QDateTime now, int 
     if(!fresh(r.service.observedAt)) return {false, "Refresh local service status first."};
     if(a == ServiceAction::Start) {
         if(r.service.state != ServiceState::Stopped) return {false, "Service must be confirmed stopped."};
-        if(r.remote.job == JobState::Running) return {false, "A job is still reported running."};
-        return {true, {}};
+        return {true, "Start this existing local service."};
     }
     if(r.service.state != ServiceState::Running) return {false, "Service must be confirmed running."};
+    if(authorization==StopAuthorization::ConfirmedImmediate)
+        return {true,"Stop this local service now. This can interrupt a job and requires confirmation."};
     if(!fresh(r.remote.observedAt)) return {false, "Refresh GitHub status first."};
     if(r.remote.connection != ConnectionState::Online || r.remote.job != JobState::Idle)
         return {false, "Stop is available only when GitHub confirms this runner is idle."};
     return {true, {}};
 }
 QJsonObject toJson(const Runner& r) {
-    QJsonObject service{{"state", text(r.service.state)}, {"detail", r.service.detail},
+    QJsonObject service{{"state", text(r.service.state)}, {"detail", r.service.detail}, {"refreshing",r.serviceRefreshing},
         {"observed_at", r.service.observedAt.toString(Qt::ISODate)},
         {"controls_available", r.service.controlsAvailable}, {"pid", r.service.pid}};
     if(r.service.cpuCores) service["cpu_cores"] = *r.service.cpuCores;
@@ -58,6 +61,7 @@ QJsonObject toJson(const Runner& r) {
         {"github_url", r.registration.githubUrl}, {"status", status(r)},
         {"service", service}, {"refreshing", r.refreshing},
         {"github", QJsonObject{{"connection", text(r.remote.connection)},
+           {"refreshing",r.remoteRefreshing},
            {"job_state", text(r.remote.job)}, {"detail", r.remote.detail},
            {"observed_at", r.remote.observedAt.toString(Qt::ISODate)},
            {"job_name", r.remote.jobName}, {"workflow", r.remote.workflowName},
