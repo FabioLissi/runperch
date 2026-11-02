@@ -115,3 +115,12 @@ path, font/text/state/geometry and explicit expected theme color. A standalone
 QImage surrogate uses different font rasterization on Linux and was rejected.
 It compares rendered text without assuming a font rasterization algorithm. The
 magenta override remains a required rejected mutation.
+
+### Remaining Windows viewport diagnosis
+
+0.8.0 native Mac and Linux gates passed; Windows still reports 10 pixels of
+horizontal overflow at both font sizes. Long-token wrapping is fixed, but that
+does not explain this separate platform result. Before changing production
+layout again, retain a failure-only Qt geometry report: popup, viewport, content,
+layout minima and each descendant's minimum/preferred/assigned width. This is a
+test diagnostic, not a relaxed gate or a speculative platform offset.

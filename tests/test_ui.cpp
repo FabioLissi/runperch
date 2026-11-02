@@ -235,6 +235,15 @@ private slots:
         auto* popup=window.findChild<RunnerPopover*>(); if(labelPixels!=13) popup->setStyleSheet(QString("QLabel {font: %1px monospace;}").arg(labelPixels)); popup->present(QRect(400,40,20,20)); qApp->processEvents();
         QVERIFY(popup->width()<=uiMetrics.popoverWidth); QVERIFY(popup->height()<=uiMetrics.popoverMaxHeight);
         auto* scroll=popup->findChild<QScrollArea*>("popoverScroll"); QVERIFY(scroll); QVERIFY(scroll->verticalScrollBar()->maximum()>0);
+        if(scroll->horizontalScrollBar()->maximum()!=0) {
+            qWarning()<<"Panel geometry"<<popup->geometry()<<"viewport"<<scroll->viewport()->geometry()
+                <<"content"<<scroll->widget()->geometry()<<"minimum"<<scroll->widget()->minimumSize()
+                <<"minimumHint"<<scroll->widget()->minimumSizeHint()<<"layoutMinimum"<<scroll->widget()->layout()->minimumSize()
+                <<"scrollbar"<<scroll->verticalScrollBar()->sizeHint();
+            for(auto* child:scroll->widget()->findChildren<QWidget*>())
+                qWarning()<<child->metaObject()->className()<<child->objectName()<<"geometry"<<child->geometry()
+                    <<"minimum"<<child->minimumSize()<<"minHint"<<child->minimumSizeHint()<<"preferred"<<child->sizeHint();
+        }
         QCOMPARE(scroll->horizontalScrollBar()->maximum(),0);
     }
     void settingsApplyAndPersistImmediatelyWithoutRequests() {
