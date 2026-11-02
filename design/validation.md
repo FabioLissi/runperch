@@ -235,3 +235,29 @@ Independent final source/reference review cleared 0.8.0 and reran seven focused
 entries covering persistence before dismissal/reopen, attached-runner management
 query counts and no-ops, long-token wrapping and the real-widget raster reference
 with its actual wrong-color mutation. All seven passed without skips.
+
+## 0.8.1 native action-row width correction
+
+- Public 0.8.0 Mac/Linux/lint gates passed. Windows still had 10 px of horizontal
+  overflow. Diagnostic-only run 41408249174 isolated the exact owner: Start195 +
+  Stop143 + spacing8 + margins32 = 378 px, versus a 368 px viewport.
+- A new local real-panel case applies those measured button minima and fails on
+  the unfixed code (14 px overflow on the Mac viewport). The reference inputs
+  are measured Windows geometry, not an arbitrary offset or changed assertion.
+- The shared panel now asks Qt for the horizontal action layout's minimum size
+  and switches its direction when it exceeds the available content width.
+  Scrollbar width, frame and content margins come from Qt. Native input and
+  confirmed service-control handling are unchanged; full labels remain readable.
+- The responsive regression verifies TopToBottom, full minimum button widths,
+  containment in the viewport and zero horizontal range. Normal-font and larger
+  wrapped-label cases remain active, as do the original native assertions.
+- Final local Mac: 7/7 CTest, core69/UI24 and full Cocoa UI24 passed. Final isolated
+  Ubuntu24/Qt6.8.3 clean build: 5/5 CTest, core57/UI24 passed. No failures/skips.
+  Actionlint1.7.12 and whitespace checks passed. The stacked stress-case capture
+  was inspected; ordinary Mac buttons remain side by side.
+- These local results still require the exact final native Windows CI gate.
+  No live runner services or authentication were changed.
+
+Independent 0.8.1 source/reference review cleared publication and reran eight
+focused entries covering all layout rows, live themes, production-history UI and
+confirmed-control routing. All passed without failures/skips.

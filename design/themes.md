@@ -124,3 +124,30 @@ does not explain this separate platform result. Before changing production
 layout again, retain a failure-only Qt geometry report: popup, viewport, content,
 layout minima and each descendant's minimum/preferred/assigned width. This is a
 test diagnostic, not a relaxed gate or a speculative platform offset.
+
+### Measured service-action layout correction (before implementation)
+
+Windows diagnostic run 41408249174 identified the remaining width owner:
+Start195 + Stop143 + spacing8 + content margins32 = 378 px minimum, versus
+a 368 px viewport after the vertical scrollbar. Wrapped labels are no longer
+the limiting widgets.
+
+Before: a permanently horizontal action pair forces the whole content wider.
+After: measure QBoxLayout::minimumSize in horizontal direction against the actual
+content width (including scrollbar allowance); use TopToBottom only when the row
+does not fit. Keep normal side-by-side sizing otherwise. Reason: standard Qt
+layout metrics handle platform fonts and longer/translated labels without pixel
+offsets, elided action names or hidden clipping.
+
+Reference: QBoxLayout::setDirection/minimumSize, QLayout::contentsMargins and
+heightForWidth. Qt remains the size/geometry owner; the adapter only chooses the
+documented layout direction. No new numerical threshold is introduced.
+
+- https://doc.qt.io/qt-6/qboxlayout.html
+- https://doc.qt.io/qt-6/qlayout.html
+
+Acceptance: the real panel with the measured Windows action minima fails before
+the fix; both
+normal and stacked cases fit the viewport, preserve full labels/actions and
+vertical scrolling. Existing Windows horizontal-range==0 assertion is unchanged.
+Mac/Linux full gates and independent review precede native CI confirmation.

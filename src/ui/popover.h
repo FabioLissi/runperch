@@ -2,6 +2,8 @@
 #include "core/monitor.h"
 #include <QFrame>
 class QComboBox;
+class QBoxLayout;
+class QScrollArea;
 class QLabel;
 class QPushButton;
 namespace runperch {
@@ -27,6 +29,8 @@ private:
     Monitor& monitor;
     QComboBox* selector;
     QWidget* content;
+    QBoxLayout* controls;
+    QScrollArea* scroll;
     QLabel *state,*activity,*local,*timing,*cpu,*memory,*observed;
     MetricsChart *cpuChart,*memoryChart;
     QPushButton *start,*stop,*job;

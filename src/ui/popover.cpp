@@ -16,6 +16,7 @@
 #include <QPushButton>
 #include <QScreen>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
 #include <cmath>
@@ -45,7 +46,7 @@ RunnerPopover::RunnerPopover(Monitor& m,QWidget* parent,Qt::WindowFlags flags):Q
     setAttribute(Qt::WA_TranslucentBackground);
     connect(&theme(),&ThemeController::changed,this,[this] { refresh(); update(); });
     auto* outer=new QVBoxLayout(this); outer->setContentsMargins(1,1,1,1);
-    auto* scroll=new QScrollArea; scroll->setObjectName("popoverScroll"); scroll->viewport()->setObjectName("popoverViewport"); scroll->setWidgetResizable(true); scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll=new QScrollArea; scroll->setObjectName("popoverScroll"); scroll->viewport()->setObjectName("popoverViewport"); scroll->setWidgetResizable(true); scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     content=new QWidget; content->setObjectName("popoverContent"); auto* column=new QVBoxLayout(content);
     column->setContentsMargins(uiMetrics.inset,uiMetrics.inset,uiMetrics.inset,uiMetrics.inset); column->setSpacing(uiMetrics.gap); column->setAlignment(Qt::AlignTop);
     auto* header=new QHBoxLayout; auto* brand=line("popoverBrand"); brand->setText("Runperch"); header->addWidget(brand); header->addStretch();
@@ -65,7 +66,7 @@ RunnerPopover::RunnerPopover(Monitor& m,QWidget* parent,Qt::WindowFlags flags):Q
     auto* caption=line("historyCaption"); caption->setText("15-minute history · fills while Runperch runs"); column->addWidget(caption);
     observed=line("popoverObserved"); column->addWidget(observed);
     job=new QPushButton("Open current job ↗"); job->setObjectName("popoverJob"); column->addWidget(job);
-    auto* controls=new QHBoxLayout; start=new QPushButton("Start service"); stop=new QPushButton("Stop now…");
+    controls=new QHBoxLayout; controls->setObjectName("popoverControls"); controls->setSpacing(uiMetrics.gap); start=new QPushButton("Start service"); stop=new QPushButton("Stop now…");
     start->setObjectName("popoverStart"); stop->setObjectName("popoverStop"); controls->addWidget(start); controls->addWidget(stop); column->addLayout(controls);
     scroll->setWidget(content); outer->addWidget(scroll);
     connect(open,&QPushButton::clicked,this,[this] { hide(); emit overviewRequested(); });
@@ -89,11 +90,23 @@ void RunnerPopover::fitContent(QRect anchor) {
     if(!screen) return;
     ensurePolished(); content->ensurePolished(); content->layout()->activate();
     const auto available=screen->availableGeometry(); const int width=qMin(uiMetrics.popoverWidth,available.width());
-    int height=content->layout()->totalHeightForWidth(width-2)+2;
-    if(height<2) height=content->sizeHint().height()+2;
-    if(height>qMin(uiMetrics.popoverMaxHeight,available.height())) {
-        height=content->layout()->totalHeightForWidth(width-2-style()->pixelMetric(QStyle::PM_ScrollBarExtent))+2;
-    }
+    const auto outer=layout()->contentsMargins();
+    const int horizontalFrame=outer.left()+outer.right()+2*scroll->frameWidth();
+    const int verticalFrame=outer.top()+outer.bottom()+2*scroll->frameWidth();
+    const auto measure=[this,verticalFrame](int contentWidth) {
+        // Qt owns all size hints and placement. Choose the row direction using
+        // its measured minimum, rather than shrinking/clipping action labels.
+        controls->setDirection(QBoxLayout::LeftToRight);
+        const auto margins=content->layout()->contentsMargins();
+        if(controls->minimumSize().width()>contentWidth-margins.left()-margins.right())
+            controls->setDirection(QBoxLayout::TopToBottom);
+        content->layout()->activate();
+        const int height=content->layout()->totalHeightForWidth(contentWidth);
+        return (height<0 ? content->sizeHint().height() : height)+verticalFrame;
+    };
+    int height=measure(width-horizontalFrame);
+    if(height>qMin(uiMetrics.popoverMaxHeight,available.height()))
+        height=measure(width-horizontalFrame-scroll->verticalScrollBar()->sizeHint().width());
     setGeometry(popoverGeometry(QSize(width,qMin(height,uiMetrics.popoverMaxHeight)),anchor,available));
 }
 void RunnerPopover::present(QRect anchor) {

@@ -16,6 +16,7 @@
 #include <QScrollBar>
 #include <QDialogButtonBox>
 #include <QVBoxLayout>
+#include <QBoxLayout>
 #include "core/resource_history.h"
 #include <QComboBox>
 #include <QAbstractItemView>
@@ -221,18 +222,25 @@ private slots:
         QVERIFY(popup->height()<500);
     }
     void compactLayoutWrapsLongWorkAndKeepsActionsScrollable_data() {
-        QTest::addColumn<int>("labelPixels");
-        QTest::newRow("platform-font")<<13;
-        QTest::newRow("large-font")<<18;
+        QTest::addColumn<int>("labelPixels"); QTest::addColumn<bool>("longActions");
+        QTest::newRow("platform-font")<<13<<false;
+        QTest::newRow("large-font")<<18<<false;
+        QTest::newRow("windows-action-minima")<<13<<true;
     }
     void compactLayoutWrapsLongWorkAndKeepsActionsScrollable() {
-        QFETCH(int,labelPixels);
+        QFETCH(int,labelPixels); QFETCH(bool,longActions);
         QTemporaryDir runner; QFile f(runner.filePath(".runner")); QVERIFY(f.open(QIODevice::WriteOnly));
         f.write("{\"agentId\":42,\"agentName\":\"hybridflow-macos-arm64-long-runner-name-for-a-studio-machine\",\"gitHubUrl\":\"https://github.com/example/project\"}"); f.close();
         TestPlatform p; TestRemote g; p.value.state=ServiceState::Running; p.value.observedAt=QDateTime::currentDateTimeUtc();
         g.value.job=JobState::Running; g.value.jobId=1; g.value.observedAt=p.value.observedAt; g.value.jobName=QString("Long workflow name ").repeated(100)+"\n"+QString(96,'W');
         Monitor m(p,g); QVERIFY(m.add(runner.path())); Window window(m,p); m.refresh();
-        auto* popup=window.findChild<RunnerPopover*>(); if(labelPixels!=13) popup->setStyleSheet(QString("QLabel {font: %1px monospace;}").arg(labelPixels)); popup->present(QRect(400,40,20,20)); qApp->processEvents();
+        auto* popup=window.findChild<RunnerPopover*>();
+        if(longActions) {
+            // Measured native minima from Windows CI run 41408249174.
+            popup->findChild<QPushButton*>("popoverStart")->setMinimumWidth(195);
+            popup->findChild<QPushButton*>("popoverStop")->setMinimumWidth(143);
+        }
+        if(labelPixels!=13) popup->setStyleSheet(QString("QLabel {font: %1px monospace;}").arg(labelPixels)); popup->present(QRect(400,40,20,20)); qApp->processEvents();
         QVERIFY(popup->width()<=uiMetrics.popoverWidth); QVERIFY(popup->height()<=uiMetrics.popoverMaxHeight);
         auto* scroll=popup->findChild<QScrollArea*>("popoverScroll"); QVERIFY(scroll); QVERIFY(scroll->verticalScrollBar()->maximum()>0);
         if(scroll->horizontalScrollBar()->maximum()!=0) {
@@ -245,6 +253,17 @@ private slots:
                     <<"minimum"<<child->minimumSize()<<"minHint"<<child->minimumSizeHint()<<"preferred"<<child->sizeHint();
         }
         QCOMPARE(scroll->horizontalScrollBar()->maximum(),0);
+        if(longActions) {
+            QCOMPARE(popup->findChild<QBoxLayout*>("popoverControls")->direction(),QBoxLayout::TopToBottom);
+            for(const auto* name:{"popoverStart","popoverStop"}) {
+                auto* action=popup->findChild<QPushButton*>(name);
+                const auto x=action->mapTo(scroll->widget(),QPoint(0,0)).x();
+                QVERIFY(x>=0); QVERIFY(x+action->width()<=scroll->viewport()->width());
+                QVERIFY(action->width()>=action->minimumSizeHint().width());
+            }
+            const auto prefix=qEnvironmentVariable("RUNPERCH_CAPTURE_CONTROLS");
+            if(!prefix.isEmpty()) {scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum()); QVERIFY(popup->grab().save(prefix+"-stacked-actions.png"));}
+        }
     }
     void settingsApplyAndPersistImmediatelyWithoutRequests() {
         TestPlatform p; TestRemote g; Monitor m(p,g); TestPresentation presence; Window window(m,p,nullptr,&presence);
