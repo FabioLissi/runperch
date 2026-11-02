@@ -108,3 +108,38 @@ for this validation. Local worker presence is process evidence, not a GitHub
 connectivity check or a source of workflow names/results. CPU is a decaying
 average, RSS can double-count shared pages, and service uptime is not job age.
 The development bundle still depends on local Qt and optional gh installations.
+
+## 0.6.0 compact panel and resource history
+
+- All 7 local Release CTest gates passed. Core: 69 passed; UI: 15 passed;
+  no failures or skips. The UI suite also passed using real Cocoa presentation.
+- The initial missing-popover regression failed on 0.5. Independent review
+  then found two additional defects: routine refresh mutated the open chooser,
+  and the job URL admitted a different job ID. Each received a failing test
+  before its fix; both now pass.
+- Monitor completion contracts verify one local observation per timestamp, no
+  samples from remote callbacks/UI refresh, validated units, bounded retention
+  and cleared history on remove/re-add. Chart tests pin timestamp positions,
+  zero scale, missing observations, long gaps and process restarts.
+- Real Window/popover tests verify runner selection, cancel/accept controls,
+  stale-state disabling, attachment identity across confirmation and fresh
+  same-job URL opening through the actual URL-handler consumer.
+- Native Cocoa caught Qt::Popup dismissal during application deactivation.
+  macOS now uses a non-activating NSPanel behind the presentation adapter.
+  The gate checks the actual panel type/style, hidden overview/Accessory mode,
+  Escape, overview/Dock restore, duplicate foreground notifications and a
+  different-app notification. Notification and key events are injected; no
+  claim of human physical-click or keyboard acceptance is made.
+- Native Cocoa handle access initially crashed the offscreen capture gates.
+  A Cocoa backend capability guard fixes both without removing those tests.
+- Independent source review and an independent native journey passed after
+  those corrections. Native observers only exist while the panel is visible,
+  use main-thread delivery and detach on hide/destruction. No live service
+  start/stop or new GitHub authorization was performed.
+- The README image captures the real Qt panel with scripted example data.
+  Workflow lint and whitespace checks pass. Previous 0.5.0 public CI passed
+  all three platforms; new 0.6.0 CI results must be verified separately.
+
+Windows/Linux native service metrics remain unimplemented. The shared GUI and
+contracts are cross-platform; macOS presentation validation does not certify
+those platforms or a self-contained/signed distribution.

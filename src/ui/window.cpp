@@ -1,4 +1,7 @@
 #include "ui/window.h"
+#include "ui/popover.h"
+#include "ui/display.h"
+#include <QCursor>
 #include "core/catalog.h"
 #include "runperch_version.h"
 #include <QApplication>
@@ -37,15 +40,6 @@ namespace {
 QLabel* label(const QString& value, const QString& name={}) {
     auto* l=new QLabel(value); l->setWordWrap(true); l->setTextFormat(Qt::PlainText);
     l->setObjectName(name); l->setTextInteractionFlags(Qt::TextSelectableByMouse); return l;
-}
-QString duration(qint64 seconds) {
-    if(seconds<0) return "—";
-    if(seconds>=86400) return QString("%1d %2h %3m").arg(seconds/86400).arg(seconds/3600%24).arg(seconds/60%60);
-    if(seconds>=3600) return QString("%1h %2m").arg(seconds/3600).arg(seconds/60%60);
-    return seconds<60 ? QString("%1s").arg(seconds) : QString("%1m %2s").arg(seconds/60).arg(seconds%60);
-}
-QString elapsed(QDateTime start) {
-    return start.isValid() ? duration(qMax<qint64>(0,start.secsTo(QDateTime::currentDateTimeUtc()))) : "—";
 }
 QColor stateColor(const QString& state) {
     if(state=="Running") return QColor("#a65d06");
@@ -131,11 +125,20 @@ Window::Window(Monitor& m, Platform& p, GitHubAuth* a, ApplicationPresentation* 
         QMenu::item { padding:7px 22px; } QMenu::item:selected { background:#dce8de; }
         QSpinBox { padding:6px; background:white; }
     )");
-    menu=new QMenu(this); tray=new QSystemTrayIcon(this);
-    QIcon trayIcon(":/assets/logo.png"); trayIcon.setIsMask(true); tray->setIcon(trayIcon); tray->setContextMenu(menu);
+    menu=new QMenu(this); menu->setObjectName("trayActions"); tray=new QSystemTrayIcon(this);
+    popover=new RunnerPopover(monitor,this,presentation ? presentation->popoverFlags() : Qt::Popup);
+    if(presentation) presentation->configurePopover(popover);
+    connect(popover,&RunnerPopover::overviewRequested,this,&Window::openOverview);
+    connect(popover,&RunnerPopover::controlRequested,this,&Window::controlRunner);
+    connect(popover,&RunnerPopover::currentJobRequested,this,&Window::openCurrentJob);
+    QIcon trayIcon(":/assets/logo.png"); trayIcon.setIsMask(true); tray->setIcon(trayIcon);
     if(statusAreaAvailable()) tray->show();
     connect(tray,&QSystemTrayIcon::activated,this,[this](QSystemTrayIcon::ActivationReason reason) {
-        if(reason==QSystemTrayIcon::DoubleClick || reason==QSystemTrayIcon::Trigger) { show(); raise(); activateWindow(); }
+        if(reason==QSystemTrayIcon::Trigger) {
+            if(popover->isVisible()) popover->hide(); else popover->present(tray->geometry());
+        } else if(reason==QSystemTrayIcon::Context) {
+            popover->hide(); trayMenu(); menu->popup(QCursor::pos());
+        } else if(reason==QSystemTrayIcon::DoubleClick) openOverview();
     });
     connect(menu,&QMenu::aboutToShow,this,&Window::trayMenu);
     connect(add,&QPushButton::clicked,this,&Window::addRunner);
@@ -170,6 +173,7 @@ Window::Window(Monitor& m, Platform& p, GitHubAuth* a, ApplicationPresentation* 
             if(auto* item=table->item(i,1)) expired |= item->text()!=status(monitor.runners()[i]);
         }
         if(expired) rebuild(); else details();
+        if(popover->isVisible()) popover->refresh();
     }); clock->start();
     rebuild();
 }
@@ -267,7 +271,7 @@ void Window::trayMenu() {
     }
     if(monitor.runners().isEmpty()) { auto* a=menu->addAction("No runners configured"); a->setEnabled(false); }
     menu->addSeparator();
-    menu->addAction("Open Runperch",this,[this] { show(); raise(); activateWindow(); });
+    menu->addAction("Open Runperch",this,&Window::openOverview);
     menu->addAction("Add existing runner…",this,&Window::addRunner);
     menu->addAction("Refresh",this,[this] { monitor.refresh(); });
     menu->addAction("Settings…",this,&Window::settings);
@@ -278,6 +282,18 @@ void Window::trayMenu() {
 void Window::control(ServiceAction action) {
     const auto i=table->currentRow(); if(i<0 || i>=monitor.runners().size()) return;
     const auto root=monitor.runners()[i].registration.root;
+    controlRunner(root,monitor.runners()[i].instanceId,action);
+}
+void Window::openOverview() { popover->hide(); show(); raise(); activateWindow(); }
+void Window::openCurrentJob(QString root,quint64 instance) {
+    for(const auto& r:monitor.runners()) if(r.registration.root==root && r.instanceId==instance) {
+        const auto url=currentJobUrl(r); if(!url.isEmpty()) QDesktopServices::openUrl(url); return;
+    }
+}
+void Window::controlRunner(QString root,quint64 instance,ServiceAction action) {
+    int i=-1;
+    for(int n=0;n<monitor.runners().size();++n) if(monitor.runners()[n].registration.root==root && monitor.runners()[n].instanceId==instance) { i=n; break; }
+    if(i<0) return;
     const auto name=monitor.runners()[i].registration.name;
     const auto& selected=monitor.runners()[i];
     const QString reportedJob=isFresh(selected.remote.observedAt) ? text(selected.remote.job) : "Unknown";
@@ -291,7 +307,7 @@ void Window::control(ServiceAction action) {
     confirmation.setDefaultButton(QMessageBox::Cancel); confirmation.exec();
     if(confirmation.clickedButton()!=apply) return;
     // Modal interaction may have refreshed/reordered the table: resolve identity again.
-    for(int n=0;n<monitor.runners().size();++n) if(monitor.runners()[n].registration.root==root) {
+    for(int n=0;n<monitor.runners().size();++n) if(monitor.runners()[n].registration.root==root && monitor.runners()[n].instanceId==instance) {
         monitor.control(n,action,action==ServiceAction::Stop ? StopAuthorization::ConfirmedImmediate : StopAuthorization::IdleOnly); break;
     }
 }

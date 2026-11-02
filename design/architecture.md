@@ -4,6 +4,7 @@ The 0.2 GitHub connection, recent-activity and icon additions have their complet
 reference conformance table in [authorization.md](authorization.md). Version 0.4
 local controls are specified in [local-service-controls.md](local-service-controls.md).
 Version 0.5 local metrics are specified in [local-stats.md](local-stats.md).
+Version 0.6 compact panel/history is specified in [menu-bar-popover.md](menu-bar-popover.md).
 
 ## Before / after / reason
 

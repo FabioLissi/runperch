@@ -55,11 +55,18 @@ struct RemoteObservation {
     bool runnerStatusReadable = false;
     QString permissionDetail;
 };
+struct ResourceSample {
+    QDateTime observedAt;
+    qint64 pid=0;
+    std::optional<double> cpuCores;
+    std::optional<qint64> rssBytes;
+};
 struct Runner {
     quint64 instanceId = 0;
     Registration registration;
     ServiceObservation service;
     RemoteObservation remote;
+    QList<ResourceSample> resources;
     bool refreshing = false;
     bool serviceRefreshing = false;
     bool remoteRefreshing = false;

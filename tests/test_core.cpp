@@ -3,6 +3,8 @@
 #include "core/monitor.h"
 #include "core/registration.h"
 #include "core/auth.h"
+#include "core/resource_history.h"
+#include <limits>
 #include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
@@ -172,6 +174,30 @@ private slots:
         writeFile(dir.filePath(".runner"),registrationData());
         link(".service"); QVERIFY(!error); QVERIFY(QFileInfo(dir.filePath(".service")).isSymLink());
         QVERIFY(!readRegistration(dir.path()).value);
+    }
+    void resourceHistoryUsesBoundedValidatedObservations() {
+        Runner r; ServiceObservation s; s.state=ServiceState::Running; s.pid=10;
+        const auto start=QDateTime::fromString("2026-01-01T00:00:00Z",Qt::ISODate);
+        for(int i=0;i<200;++i) { s.observedAt=start.addSecs(4*i); s.cpuCores=i/100.0; s.rssBytes=1024*i; recordResources(r,s,s.observedAt); }
+        QCOMPARE(r.resources.size(),resourceHistoryMaxSamples); QCOMPARE(r.resources.first().cpuCores.value(),0.2);
+        recordResources(r,s,s.observedAt); QCOMPARE(r.resources.size(),resourceHistoryMaxSamples);
+        auto now=s.observedAt; s.observedAt=now.addSecs(1); recordResources(r,s,now); QCOMPARE(r.resources.last().observedAt,now);
+        s.observedAt=now.addSecs(-1); recordResources(r,s,now); QCOMPARE(r.resources.last().observedAt,now);
+        s.observedAt=now.addSecs(5); s.cpuCores=std::numeric_limits<double>::infinity(); s.rssBytes=-1;
+        recordResources(r,s,s.observedAt); QVERIFY(!r.resources.last().cpuCores); QVERIFY(!r.resources.last().rssBytes);
+        s.observedAt=s.observedAt.addSecs(5); s.state=ServiceState::Stopped; s.cpuCores=1; s.rssBytes=5;
+        recordResources(r,s,s.observedAt); QVERIFY(!r.resources.last().cpuCores);
+        recordResources(r,s,s.observedAt.addSecs(resourceHistoryWindowSeconds+1)); QVERIFY(r.resources.isEmpty());
+    }
+    void monitorRecordsOnlyLocalCompletionsAndDropsRemovedHistory() {
+        QTemporaryDir dir; writeFile(dir.filePath(".runner"),registrationData());
+        FakePlatform p; p.observation=ready().service; p.observation.cpuCores=0.75; p.observation.rssBytes=1024;
+        FakeRemote g; g.deferred=true; Monitor monitor(p,g); QVERIFY(monitor.add(dir.path()));
+        monitor.refresh(); QCOMPARE(monitor.runners()[0].resources.size(),1);
+        g.callbacks.takeFirst()(ready().remote); QCOMPARE(monitor.runners()[0].resources.size(),1);
+        monitor.refresh(true); QCOMPARE(monitor.runners()[0].resources.size(),1);
+        const auto id=monitor.runners()[0].instanceId;
+        monitor.remove(0); QVERIFY(monitor.add(dir.path())); QVERIFY(monitor.runners()[0].resources.isEmpty()); QVERIFY(monitor.runners()[0].instanceId!=id);
     }
     void localServiceDoesNotImplyOnlineOrIdle() {
         auto r=ready(); r.remote={}; QCOMPARE(status(r),"Service running");

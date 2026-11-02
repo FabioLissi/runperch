@@ -21,7 +21,10 @@ and open the current job without hunting through terminals.
 - **Current work:** workflow, job, reported step, elapsed time and GitHub link.
 - **Local observations:** process-tree CPU average, aggregate RSS, free disk,
   service uptime and worker activity, without GitHub sign-in or admin access.
-- **Menu bar / tray:** see runner states and open the main window quickly.
+- **Menu bar / tray:** compact runner picker, local status and uptime, current
+  work, Start/Stop and Open current job, with an overview/action-menu fallback.
+- **Resource graphs:** bounded 15-minute CPU-average and RSS history; missing
+  observations and service restarts remain visible gaps.
 - **Local history:** a bounded list of jobs observed while Runperch runs.
 - **Connect GitHub:** browser/device sign-in through GitHub CLI, with account identity and no token copying.
 - **Recent results:** latest matched completed jobs and their server-reported outcomes.
@@ -37,22 +40,26 @@ Click a thumbnail to see the full image.
 
 <table>
   <tr>
-    <td width="50%" align="center">
+    <td width="33%" align="center">
       <a href="assets/screenshots/macos-first-launch.png"><img src="assets/screenshots/macos-first-launch.png" width="460" alt="Actual Runperch macOS first-launch window with Add existing runner"></a>
       <br><strong>macOS app · first launch</strong><br>
       Actual application capture from version 0.1.0.
     </td>
-    <td width="50%" align="center">
+    <td width="33%" align="center">
       <a href="assets/ui-concept.png"><img src="assets/ui-concept.png" width="460" alt="Runperch design concept with sample runners and a menu-bar panel"></a>
       <br><strong>Interface design concept</strong><br>
       Sample data and intended visual direction.
+    </td>
+    <td width="33%" align="center">
+      <a href="assets/screenshots/macos-popover.png"><img src="assets/screenshots/macos-popover.png" width="260" alt="Runperch compact runner panel with CPU and memory history"></a>
+      <br><strong>Compact runner panel · 0.6.0</strong><br>
+      Actual Qt interface with scripted sample data.
     </td>
   </tr>
 </table>
 
 The current app implements the table, details, metrics, history, settings and
-tray menu. The concept's sparklines and compact runner-detail popover are not
-implemented in this first version. Public screenshots contain no personal
+tray menu. The compact popover and CPU/RSS graphs are implemented in version 0.6.0. Public screenshots contain no personal
 runner configuration or credentials.
 
 ## Status
@@ -139,6 +146,13 @@ successful query is not a health verdict: inspect the returned states.
 
 ## Controls and status
 
+- Click the menu-bar/tray icon for a compact runner panel. Choose a runner to
+  see its live state and recent CPU/memory samples. Right-click for the action
+  menu; **Open overview** restores the full window and Dock icon.
+- Graphs keep at most 180 samples over 15 minutes, only in memory while the app
+  is open. They use actual timestamps and gaps, not fabricated intermediate data.
+- **Open current job** requires a fresh active job observation; local worker
+  presence alone provides no job URL. Completed jobs remain in History.
 - Service, GitHub connection and job state are separate observations.
 - Expired observations are unknown; process existence does not prove online.
 - Start/stop use the existing user LaunchAgent, with identity checked again.

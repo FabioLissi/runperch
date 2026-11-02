@@ -11,6 +11,7 @@ class QPushButton;
 class QMenu;
 class QStackedWidget;
 namespace runperch {
+class RunnerPopover;
 class Window final : public QMainWindow {
     Q_OBJECT
 public:
@@ -30,6 +31,9 @@ private:
     void history();
     void authorization();
     void control(ServiceAction);
+    void controlRunner(QString root,quint64 instance,ServiceAction);
+    void openCurrentJob(QString root,quint64 instance);
+    void openOverview();
     void persist();
     Monitor& monitor;
     Platform& platform;
@@ -51,6 +55,7 @@ private:
     QSystemTrayIcon* tray=nullptr;
     bool dockVisible=true;
     QMenu* menu;
+    RunnerPopover* popover;
     QString selectedRoot;
 };
 }

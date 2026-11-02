@@ -1,5 +1,6 @@
 #include "core/monitor.h"
 #include "core/registration.h"
+#include "core/resource_history.h"
 #include <QJsonDocument>
 #include <QSettings>
 
@@ -70,7 +71,7 @@ void Monitor::complete(const QString& root, quint64 cycle, quint64 id, bool remo
     const int i = find(root);
     if(i >= 0 && items[i].instanceId==id) {
         if(remote) { items[i].remote = std::move(g); items[i].remoteRefreshing=false; remember(items[i]); }
-        else { items[i].service = std::move(s); items[i].serviceRefreshing=false; }
+        else { recordResources(items[i],s); items[i].service = std::move(s); items[i].serviceRefreshing=false; }
         items[i].refreshing=items[i].serviceRefreshing || items[i].remoteRefreshing;
     }
     --pending;
@@ -115,6 +116,7 @@ void Monitor::control(int i, ServiceAction action, StopAuthorization authorizati
                 if(!registration.value || *registration.value!=check->registration) {
                     observation={}; observation.detail="Runner registration changed; remove and re-add it.";
                 }
+                recordResources(items[current],observation);
                 items[current].service=std::move(observation);
                 items[current].changingService=false; items[current].serviceRefreshing=false;
                 items[current].refreshing=items[current].remoteRefreshing; emit changed(); emit message(text,!ok);
